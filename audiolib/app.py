@@ -412,7 +412,6 @@ class RoundedButton(tk.Canvas):
             bd=0,
             cursor="hand2",
             takefocus=True,
-            yscrollincrement=row_height + row_gap,
         )
         self.bind("<Enter>", self._enter)
         self.bind("<Leave>", self._leave)
@@ -941,6 +940,7 @@ class RoundedDropdown(tk.Canvas):
             bd=0,
             cursor="hand2",
             takefocus=True,
+            yscrollincrement=row_height + row_gap,
         )
         viewport.place(
             x=popup_padding,
