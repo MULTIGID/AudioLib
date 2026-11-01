@@ -5962,6 +5962,22 @@ class AudioLibraryApp:
         def worker() -> None:
             update_command = None
             error = None
+
+            def preparation_progress(completed: int, total: int) -> None:
+                if self._closing_event.is_set():
+                    return
+                try:
+                    self.root.after(
+                        0,
+                        lambda current=completed, size=total: progress_dialog.set_progress(
+                            "Підготовка файлів оновлення…",
+                            current,
+                            size,
+                        ),
+                    )
+                except tk.TclError:
+                    pass
+
             try:
                 package = self.update_manager.download(release, progress)
                 try:
@@ -5978,6 +5994,8 @@ class AudioLibraryApp:
                     package,
                     self.root_dir,
                     os.getpid(),
+                    progress=preparation_progress,
+                    language=str(self.app_settings["language"]),
                 )
             except Exception as caught:
                 error = caught

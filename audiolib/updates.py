@@ -301,6 +301,8 @@ class GitHubUpdateManager:
         package_path: Path,
         install_dir: Path,
         process_id: int,
+        progress: Callable[[int, int], None] | None = None,
+        language: str = "uk",
     ) -> list[str]:
         if sys.platform != "win32" or not getattr(sys, "frozen", False):
             raise UpdateError(
@@ -309,6 +311,39 @@ class GitHubUpdateManager:
         package_path = package_path.resolve()
         install_dir = install_dir.resolve()
         work_dir = package_path.parent
+        extract_dir = work_dir / "extracted"
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        self._validate_package(package_path)
+        try:
+            with zipfile.ZipFile(package_path) as archive:
+                infos = archive.infolist()
+                total = sum(info.file_size for info in infos if not info.is_dir())
+                completed = 0
+                if progress is not None:
+                    progress(0, total)
+                for info in infos:
+                    relative = Path(info.filename.replace("\\", "/"))
+                    destination = extract_dir.joinpath(*relative.parts)
+                    if info.is_dir():
+                        destination.mkdir(parents=True, exist_ok=True)
+                        continue
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(info) as source, destination.open("wb") as output:
+                        while True:
+                            chunk = source.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            output.write(chunk)
+                            completed += len(chunk)
+                            if progress is not None:
+                                progress(completed, total)
+            wrapped_root = extract_dir / "AudioLib"
+            new_root = wrapped_root if (wrapped_root / "AudioLib.exe").is_file() else extract_dir
+            if not (new_root / "AudioLib.exe").is_file() or not (new_root / "_internal").is_dir():
+                raise UpdateError("Пакет оновлення має некоректну структуру.")
+        except Exception:
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            raise
         helper_path = work_dir / "apply_update.ps1"
         helper_path.write_text(_POWERSHELL_HELPER, encoding="utf-8-sig")
         return [
@@ -327,6 +362,8 @@ class GitHubUpdateManager:
             str(install_dir),
             "-WorkDir",
             str(work_dir),
+            "-Language",
+            "en" if language == "en" else "uk",
         ]
 
     def cleanup_stale_downloads(self) -> None:
@@ -347,12 +384,14 @@ _POWERSHELL_HELPER = r'''param(
     [Parameter(Mandatory=$true)][int]$TargetPid,
     [Parameter(Mandatory=$true)][string]$PackagePath,
     [Parameter(Mandatory=$true)][string]$InstallDir,
-    [Parameter(Mandatory=$true)][string]$WorkDir
+    [Parameter(Mandatory=$true)][string]$WorkDir,
+    [ValidateSet("uk", "en")][string]$Language = "uk"
 )
 $ErrorActionPreference = "Stop"
 $logPath = Join-Path $InstallDir "data\update.log"
 $extractDir = Join-Path $WorkDir "extracted"
 $backupDir = Join-Path $WorkDir "backup"
+$readyFile = Join-Path $WorkDir "startup_ready"
 $oldExe = Join-Path $InstallDir "AudioLib.exe"
 $oldInternal = Join-Path $InstallDir "_internal"
 $backupExe = Join-Path $backupDir "AudioLib.exe"
@@ -361,12 +400,98 @@ $exeBackedUp = $false
 $internalBackedUp = $false
 $newExeInstalled = $false
 $newInternalInstalled = $false
+$startedProcess = $null
+$form = $null
+
+function LocalText([string]$Ukrainian, [string]$English) {
+    if ($Language -eq "en") { return $English }
+    return $Ukrainian
+}
+
+function Refresh-Window {
+    if ($null -ne $form -and -not $form.IsDisposed) {
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+}
+
+function Set-UpdateStatus([string]$Text, [string]$Detail) {
+    if ($null -ne $script:statusLabel) { $script:statusLabel.Text = $Text }
+    if ($null -ne $script:detailLabel) { $script:detailLabel.Text = $Detail }
+    Refresh-Window
+}
 
 try {
-    Wait-Process -Id $TargetPid -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "AudioLib"
+    $form.Size = New-Object System.Drawing.Size(430, 248)
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = "FixedSingle"
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.ControlBox = $false
+    $form.TopMost = $true
+    $form.BackColor = [System.Drawing.Color]::FromArgb(17, 24, 39)
+
+    $picture = New-Object System.Windows.Forms.PictureBox
+    $picture.Location = New-Object System.Drawing.Point(173, 18)
+    $picture.Size = New-Object System.Drawing.Size(72, 72)
+    $picture.SizeMode = "Zoom"
+    if (Test-Path -LiteralPath $oldExe) {
+        $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($oldExe)
+        if ($null -ne $icon) {
+            $picture.Image = $icon.ToBitmap()
+            $icon.Dispose()
+        }
+    }
+    $form.Controls.Add($picture)
+
+    $titleLabel = New-Object System.Windows.Forms.Label
+    $titleLabel.Text = "AudioLib"
+    $titleLabel.ForeColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
+    $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 16)
+    $titleLabel.TextAlign = "MiddleCenter"
+    $titleLabel.Location = New-Object System.Drawing.Point(20, 92)
+    $titleLabel.Size = New-Object System.Drawing.Size(378, 30)
+    $form.Controls.Add($titleLabel)
+
+    $script:statusLabel = New-Object System.Windows.Forms.Label
+    $script:statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
+    $script:statusLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $script:statusLabel.TextAlign = "MiddleCenter"
+    $script:statusLabel.Location = New-Object System.Drawing.Point(20, 125)
+    $script:statusLabel.Size = New-Object System.Drawing.Size(378, 24)
+    $form.Controls.Add($script:statusLabel)
+
+    $script:detailLabel = New-Object System.Windows.Forms.Label
+    $script:detailLabel.ForeColor = [System.Drawing.Color]::FromArgb(156, 163, 175)
+    $script:detailLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+    $script:detailLabel.TextAlign = "MiddleCenter"
+    $script:detailLabel.Location = New-Object System.Drawing.Point(20, 148)
+    $script:detailLabel.Size = New-Object System.Drawing.Size(378, 22)
+    $form.Controls.Add($script:detailLabel)
+
+    $progressBar = New-Object System.Windows.Forms.ProgressBar
+    $progressBar.Style = "Marquee"
+    $progressBar.MarqueeAnimationSpeed = 25
+    $progressBar.Location = New-Object System.Drawing.Point(34, 180)
+    $progressBar.Size = New-Object System.Drawing.Size(350, 8)
+    $form.Controls.Add($progressBar)
+
+    Set-UpdateStatus (LocalText "Завершення роботи AudioLib…" "Closing AudioLib…") (LocalText "Підготовка до встановлення оновлення" "Preparing to install the update")
+    $form.Show()
+    Refresh-Window
+
+    while ($null -ne (Get-Process -Id $TargetPid -ErrorAction SilentlyContinue)) {
+        Refresh-Window
+        Start-Sleep -Milliseconds 80
+    }
+
+    Set-UpdateStatus (LocalText "Встановлення оновлення…" "Installing update…") (LocalText "Заміна файлів програми" "Replacing application files")
     New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-    Expand-Archive -LiteralPath $PackagePath -DestinationPath $extractDir -Force
     $wrappedRoot = Join-Path $extractDir "AudioLib"
     if (Test-Path -LiteralPath (Join-Path $wrappedRoot "AudioLib.exe")) {
         $newRoot = $wrappedRoot
@@ -391,10 +516,35 @@ try {
     $newInternalInstalled = $true
     Move-Item -LiteralPath $newExe -Destination $oldExe -Force
     $newExeInstalled = $true
-    Start-Process -FilePath $oldExe -WorkingDirectory $InstallDir
+
+    Set-UpdateStatus (LocalText "Запуск нової версії…" "Starting the new version…") (LocalText "AudioLib відкриється автоматично" "AudioLib will open automatically")
+    Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
+    $env:AUDIOLIB_UPDATE_READY = $readyFile
+    try {
+        $startedProcess = Start-Process -FilePath $oldExe -WorkingDirectory $InstallDir -PassThru
+    }
+    finally {
+        Remove-Item Env:AUDIOLIB_UPDATE_READY -ErrorAction SilentlyContinue
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while (-not (Test-Path -LiteralPath $readyFile)) {
+        if ($startedProcess.HasExited) {
+            throw (LocalText "Нова версія AudioLib завершила роботу під час запуску." "The new AudioLib version exited during startup.")
+        }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            $message = "{0} UPDATE_START_CONFIRMATION_TIMEOUT" -f (Get-Date -Format s)
+            New-Item -ItemType Directory -Path (Split-Path $logPath) -Force | Out-Null
+            Add-Content -LiteralPath $logPath -Value $message -Encoding UTF8
+            break
+        }
+        Refresh-Window
+        Start-Sleep -Milliseconds 80
+    }
+    if ($null -ne $form -and -not $form.IsDisposed) { $form.Close() }
     Remove-Item -LiteralPath $backupDir -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $PackagePath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
     exit 0
 }
 catch {
@@ -415,6 +565,19 @@ catch {
     }
     if (Test-Path -LiteralPath $oldExe) {
         Start-Process -FilePath $oldExe -WorkingDirectory $InstallDir
+    }
+    if ($null -ne $form -and -not $form.IsDisposed) {
+        Set-UpdateStatus (LocalText "Не вдалося встановити оновлення" "Update installation failed") $_.Exception.Message
+        $progressBar.Style = "Blocks"
+        $progressBar.Value = 0
+        Refresh-Window
+        [System.Windows.Forms.MessageBox]::Show(
+            $_.Exception.Message,
+            (LocalText "Оновлення AudioLib" "AudioLib Update"),
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+        $form.Close()
     }
     exit 1
 }

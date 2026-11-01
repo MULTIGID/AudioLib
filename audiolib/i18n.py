@@ -167,6 +167,7 @@ UK_TO_EN = {
     "Повторити": "Retry",
     "Поточна версія: {version}": "Current version: {version}",
     "Підготовка до перезапуску…": "Preparing to restart…",
+    "Підготовка файлів оновлення…": "Preparing update files…",
     "Перевірка пакета оновлення…": "Verifying the update package…",
     "Перевірка цілісності та структури файлів": "Checking file integrity and structure",
     "AudioLib автоматично продовжить установлення після закриття": "AudioLib will automatically continue installation after closing",

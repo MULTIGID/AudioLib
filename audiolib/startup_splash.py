@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+import sys
 from pathlib import Path
 
 
@@ -36,7 +37,10 @@ class StartupSplash:
         body.pack(fill="both", expand=True, padx=1, pady=1)
 
         self._logo = None
-        logo_path = root_dir / "assets" / "audiolib_icon.png"
+        asset_root = root_dir / "assets"
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            asset_root = Path(sys._MEIPASS) / "assets"
+        logo_path = asset_root / "audiolib_icon.png"
         try:
             source = tk.PhotoImage(file=str(logo_path))
             factor = max(1, round(max(source.width(), source.height()) / 88))

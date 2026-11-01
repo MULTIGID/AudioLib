@@ -1,6 +1,7 @@
 import ctypes
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -16,7 +17,7 @@ from audiolib.startup import (
 
 ERROR_ALREADY_EXISTS = 183
 WAIT_OBJECT_0 = 0
-INSTANCE_EVENT_NAME = "Local\\MULTIGID.AudioLib.2.8.2.ShowWindow"
+INSTANCE_EVENT_NAME = "Local\\MULTIGID.AudioLib.2.8.3.ShowWindow"
 
 
 def _application_root() -> Path:
@@ -68,6 +69,16 @@ def _startup_language(root_dir: Path) -> str:
         return "en" if payload.get("language") == "en" else "uk"
     except (FileNotFoundError, OSError, ValueError, TypeError, AttributeError):
         return "uk"
+
+
+def _signal_update_start_ready() -> None:
+    ready_path = os.environ.pop("AUDIOLIB_UPDATE_READY", "").strip()
+    if not ready_path:
+        return
+    try:
+        Path(ready_path).write_text("ready", encoding="ascii")
+    except OSError:
+        pass
 
 
 def _cleanup_old_startup_entries(
@@ -166,6 +177,7 @@ if __name__ == "__main__":
                 master=startup_root,
             )
             splash.update(12, "Підготовка компонентів…", "Preparing components…")
+            _signal_update_start_ready()
         except Exception:
             splash = None
 
@@ -182,6 +194,8 @@ if __name__ == "__main__":
         )
         if splash is not None:
             splash.update(100, "Готово", "Ready")
+        else:
+            _signal_update_start_ready()
     finally:
         if splash is not None:
             splash.close()
