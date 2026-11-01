@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="512"
+     height="512"
+     viewBox="0 0 512 512"
+     role="img"
+     aria-labelledby="title description">
+  <title id="title">Favorites bookmarks</title>
+  <desc id="description">Two overlapping bookmarks with white fill and black edges.</desc>
+
+  <g fill="#ffffff"
+     stroke="#000000"
+     stroke-width="28"
+     stroke-linecap="round"
+     stroke-linejoin="round">
+    <path d="M210 90 H400 V350 L305 290 L210 350 Z"/>
+    <path d="M115 160 H315 V430 L215 367 L115 430 Z"/>
+  </g>
+</svg>

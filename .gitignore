@@ -1,0 +1,41 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Test, lint, and editor caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
+*.code-workspace
+
+# PyInstaller output
+build/
+dist/
+
+# Packaged releases belong in GitHub Releases, not Git history
+AudioLib_*.zip
+
+# Personal library, recordings, photos, backups, and local settings
+data/
+SOUNDS/
+Backups/
+backups/
+
+# Runtime files
+*.log
+*.pid
+*.tmp
+*.bak
+
+# OS-generated files
+Thumbs.db
+Desktop.ini
+.DS_Store

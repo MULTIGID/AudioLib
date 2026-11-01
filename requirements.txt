@@ -1,0 +1,4 @@
+Pillow>=10.0,<13
+mutagen>=1.47,<2
+miniaudio>=1.61,<2
+pystray>=0.19,<1
