@@ -1,7 +1,7 @@
 VSVersionInfo(
     ffi=FixedFileInfo(
-        filevers=(2, 7, 0, 0),
-        prodvers=(2, 7, 0, 0),
+        filevers=(2, 7, 1, 0),
+        prodvers=(2, 7, 1, 0),
         mask=0x3F,
         flags=0x0,
         OS=0x40004,
@@ -17,12 +17,12 @@ VSVersionInfo(
                     [
                         StringStruct("CompanyName", "MULTIGID + ChatGPT"),
                         StringStruct("FileDescription", "Локальна бібліотека аудіозаписів"),
-                        StringStruct("FileVersion", "2.7.0"),
+                        StringStruct("FileVersion", "2.7.1"),
                         StringStruct("InternalName", "AudioLib"),
                         StringStruct("LegalCopyright", "Copyright 2026 MULTIGID + ChatGPT"),
                         StringStruct("OriginalFilename", "AudioLib.exe"),
                         StringStruct("ProductName", "AudioLib"),
-                        StringStruct("ProductVersion", "2.7.0"),
+                        StringStruct("ProductVersion", "2.7.1"),
                     ],
                 )
             ]
