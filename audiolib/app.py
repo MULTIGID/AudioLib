@@ -806,6 +806,7 @@ class RoundedDropdown(tk.Canvas):
         width: int = 390,
         height: int = 38,
         placeholder: str = "Оберіть значення",
+        translate_values: bool = True,
     ) -> None:
         super().__init__(
             parent,
@@ -820,6 +821,7 @@ class RoundedDropdown(tk.Canvas):
         self.textvariable = textvariable
         self.command = command
         self.placeholder = placeholder
+        self.translate_values = translate_values
         self.values: list[str] = []
         self.selected_index = -1
         self.popup: tk.Toplevel | None = None
@@ -874,7 +876,8 @@ class RoundedDropdown(tk.Canvas):
             outline=outline,
         )
         self.create_image(0, 0, image=self._surface_image, anchor="nw")
-        label = tr(self.textvariable.get() or self.placeholder)
+        value = self.textvariable.get()
+        label = self._display_value(value) if value else tr(self.placeholder)
         self.create_text(
             13,
             height / 2 - 2,
@@ -895,6 +898,9 @@ class RoundedDropdown(tk.Canvas):
             image=self._arrow_image,
             anchor="center",
         )
+
+    def _display_value(self, value: str) -> str:
+        return tr(value) if self.translate_values else value
 
     def _enter(self, _event=None) -> None:
         self.hovered = True
@@ -1030,7 +1036,7 @@ class RoundedDropdown(tk.Canvas):
             row.create_text(
                 12,
                 row_height / 2,
-                text=tr(self.values[index]),
+                text=self._display_value(self.values[index]),
                 fill=TEXT,
                 font=("Segoe UI", 10),
                 anchor="w",
@@ -5918,6 +5924,7 @@ class AudioLibraryApp:
             textvariable=language_value,
             command=apply_language,
             width=360,
+            translate_values=False,
         )
         language_dropdown.configure(values=language_labels)
         language_dropdown.current(language_keys.index(current_language))
