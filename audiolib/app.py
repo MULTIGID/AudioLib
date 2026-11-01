@@ -412,6 +412,7 @@ class RoundedButton(tk.Canvas):
             bd=0,
             cursor="hand2",
             takefocus=True,
+            yscrollincrement=row_height + row_gap,
         )
         self.bind("<Enter>", self._enter)
         self.bind("<Leave>", self._leave)
@@ -892,8 +893,14 @@ class RoundedDropdown(tk.Canvas):
         self.update_idletasks()
         width = self.winfo_width()
         visible_rows = min(8, len(self.values))
-        row_height = 32
-        height = visible_rows * row_height + 10
+        row_height = max(34, self.winfo_height())
+        row_gap = 4
+        popup_padding = 6
+        height = (
+            popup_padding * 2
+            + visible_rows * row_height
+            + max(0, visible_rows - 1) * row_gap
+        )
         popup = tk.Toplevel(self)
         owner = self.winfo_toplevel()
         popup.transient(owner)
@@ -924,49 +931,136 @@ class RoundedDropdown(tk.Canvas):
             image=popup._audiolib_surface_image,
             anchor="nw",
         )
-        listbox = tk.Listbox(
+
+        content_width = max(1, width - popup_padding * 2)
+        viewport_height = max(1, height - popup_padding * 2)
+        viewport = tk.Canvas(
             popup,
             bg=PANEL,
-            fg=TEXT,
-            selectbackground=ACCENT,
-            selectforeground=TEXT,
-            relief="flat",
-            bd=0,
             highlightthickness=0,
-            font=("Segoe UI", 10),
-            activestyle="none",
-            exportselection=False,
+            bd=0,
             cursor="hand2",
+            takefocus=True,
         )
-        for value in self.values:
-            listbox.insert("end", value)
-        if self.selected_index >= 0:
-            listbox.selection_set(self.selected_index)
-            listbox.activate(self.selected_index)
-            listbox.see(self.selected_index)
-        listbox.place(x=5, y=5, width=width - 10, height=height - 10)
+        viewport.place(
+            x=popup_padding,
+            y=popup_padding,
+            width=content_width,
+            height=viewport_height,
+        )
+        rows_frame = tk.Frame(viewport, bg=PANEL, bd=0, highlightthickness=0)
+        rows_window = viewport.create_window(
+            0,
+            0,
+            window=rows_frame,
+            anchor="nw",
+            width=content_width,
+        )
+        rows: list[tk.Canvas] = []
+        keyboard_index = self.selected_index if self.selected_index >= 0 else 0
 
-        def choose(event=None) -> str:
-            if event is not None and getattr(event, "y", None) is not None:
-                index = listbox.nearest(event.y)
-            else:
-                selection = listbox.curselection()
-                index = selection[0] if selection else listbox.index("active")
+        def draw_row(index: int, *, hovered: bool = False) -> None:
+            row = rows[index]
+            row.delete("all")
+            selected = index == self.selected_index
+            fill = ACCENT if selected else ("#334155" if hovered else CARD)
+            outline = ACCENT_HOVER if selected else ("#64748b" if hovered else None)
+            row._audiolib_surface_image = self._rounded_surface(
+                content_width,
+                row_height,
+                fill=fill,
+                outline=outline,
+                radius=8,
+            )
+            row.create_image(
+                0,
+                0,
+                image=row._audiolib_surface_image,
+                anchor="nw",
+            )
+            row.create_text(
+                12,
+                row_height / 2,
+                text=self.values[index],
+                fill=TEXT,
+                font=("Segoe UI", 10),
+                anchor="w",
+            )
+
+        def choose(index: int) -> str:
             if 0 <= index < len(self.values):
                 self._select(index)
             return "break"
 
-        listbox.bind("<ButtonRelease-1>", choose)
-        listbox.bind("<Return>", choose)
-        listbox.bind("<Escape>", lambda _event: self._close_popup())
-        listbox.bind(
-            "<MouseWheel>",
-            lambda event: listbox.yview_scroll(-1 if event.delta > 0 else 1, "units"),
-        )
+        def scroll_rows(event) -> str:
+            if len(self.values) > visible_rows:
+                viewport.yview_scroll(-1 if event.delta > 0 else 1, "units")
+            return "break"
+
+        for index in range(len(self.values)):
+            row = tk.Canvas(
+                rows_frame,
+                width=content_width,
+                height=row_height,
+                bg=PANEL,
+                highlightthickness=0,
+                bd=0,
+                cursor="hand2",
+            )
+            row.pack(
+                fill="x",
+                pady=(0, row_gap if index < len(self.values) - 1 else 0),
+            )
+            rows.append(row)
+            draw_row(index)
+            row.bind("<Enter>", lambda _event, i=index: draw_row(i, hovered=True))
+            row.bind("<Leave>", lambda _event, i=index: draw_row(i))
+            row.bind("<ButtonRelease-1>", lambda _event, i=index: choose(i))
+            row.bind("<MouseWheel>", scroll_rows)
+
+        content_height = len(self.values) * row_height + max(
+            0, len(self.values) - 1
+        ) * row_gap
+        viewport.configure(scrollregion=(0, 0, content_width, content_height))
+        viewport.itemconfigure(rows_window, width=content_width)
+        if self.selected_index >= visible_rows:
+            viewport.yview_moveto(
+                min(
+                    1.0,
+                    (self.selected_index * (row_height + row_gap))
+                    / max(1, content_height),
+                )
+            )
+
+        def move_keyboard(step: int) -> str:
+            nonlocal keyboard_index
+            previous = keyboard_index
+            keyboard_index = max(0, min(len(self.values) - 1, keyboard_index + step))
+            draw_row(previous)
+            draw_row(keyboard_index, hovered=True)
+            row_top = keyboard_index * (row_height + row_gap)
+            row_bottom = row_top + row_height
+            visible_top = viewport.canvasy(0)
+            visible_bottom = visible_top + viewport_height
+            if row_top < visible_top:
+                viewport.yview_moveto(row_top / max(1, content_height))
+            elif row_bottom > visible_bottom:
+                viewport.yview_moveto(
+                    max(0.0, (row_bottom - viewport_height) / max(1, content_height))
+                )
+            return "break"
+
+        viewport.bind("<Up>", lambda _event: move_keyboard(-1))
+        viewport.bind("<Down>", lambda _event: move_keyboard(1))
+        viewport.bind("<Home>", lambda _event: move_keyboard(-len(self.values)))
+        viewport.bind("<End>", lambda _event: move_keyboard(len(self.values)))
+        viewport.bind("<Return>", lambda _event: choose(keyboard_index))
+        viewport.bind("<MouseWheel>", scroll_rows)
+        viewport.bind("<Escape>", lambda _event: self._close_popup())
         popup.bind("<Escape>", lambda _event: self._close_popup())
         popup.bind("<FocusOut>", lambda _event: popup.after(80, self._close_if_unfocused))
         popup.lift()
-        listbox.focus_force()
+        viewport.focus_force()
         self._draw()
 
     def _sync_popup_position(self) -> None:
