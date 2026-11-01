@@ -584,6 +584,12 @@ class RoundedButton(tk.Canvas):
         options = dict(cnf or {})
         options.update(kwargs)
         redraw = False
+        if "color" in options:
+            self.normal_color = str(options.pop("color"))
+            redraw = True
+        if "hover_color" in options:
+            self.hover_color = str(options.pop("hover_color"))
+            redraw = True
         if "text" in options:
             self.text = tr(options.pop("text"))
             width, height = self._requested_size()
@@ -607,6 +613,10 @@ class RoundedButton(tk.Canvas):
             return self.text
         if key == "state":
             return self.state
+        if key == "color":
+            return self.normal_color
+        if key == "hover_color":
+            return self.hover_color
         return super().cget(key)
 
 
@@ -3710,11 +3720,12 @@ class AudioLibraryApp:
         parent: tk.Misc,
         text: str,
         command,
-        color: str = ACCENT,
+        color: str | None = None,
         *,
         rounded: bool = True,
         image: ImageTk.PhotoImage | None = None,
     ) -> tk.Widget:
+        color = color or ACCENT
         hover_colors = {
             ACCENT: ACCENT_HOVER,
             DANGER: "#b91c1c",
@@ -5669,6 +5680,17 @@ class AudioLibraryApp:
         if not path or not path.exists():
             _showerror("Файл не знайдено", "Аудіофайл відсутній у бібліотеці.", parent=self.root)
             return
+        # Do not render the same recording through the direct player and the
+        # virtual-microphone monitor at once.  Besides sounding doubled
+        # locally, Discord can capture the direct copy during screen sharing.
+        if (
+            self.virtual_track_id == track_id
+            or self._microphone_load_track_id == track_id
+        ):
+            self._microphone_load_serial += 1
+            self._microphone_load_track_id = None
+            self.virtual_microphone.stop_sound()
+            self.virtual_track_id = None
         try:
             self.player.stop()
         except PlayerError:
@@ -5732,6 +5754,22 @@ class AudioLibraryApp:
         if not path or not path.exists():
             _showerror("Файл не знайдено", "Аудіофайл відсутній у бібліотеці.", parent=self.root)
             return
+        # The bridge already creates the optional physical-headphone monitor.
+        # Stop a direct copy of this same track so it cannot be captured a
+        # second time by Discord's screen-share audio path.
+        if (
+            self.current_track_id == track_id
+            or self._speaker_load_track_id == track_id
+        ):
+            self._speaker_load_serial += 1
+            self._speaker_load_track_id = None
+            try:
+                self.player.stop()
+            except PlayerError:
+                pass
+            self.progress.set(0)
+            self.play_pause_button.configure(text="▶")
+            self.time_text.set(f"0:00 / {format_time(self.current_track_length_ms)}")
         self.virtual_microphone.stop_sound()
         self.virtual_track_id = None
         self._prepare_track_audio("microphone", track, path)
@@ -6423,7 +6461,8 @@ class AudioLibraryApp:
             playback_panel,
             "Локальне прослуховування",
             "Відтворювати у вибрані навушники записи з віртуального мікрофона, "
-            "не спрямовуючи копію назад у VB-CABLE.",
+            "не спрямовуючи копію назад у VB-CABLE. Вимкніть під час демонстрації "
+            "екрана, якщо Discord захоплює локальний звук удруге.",
             local_monitoring_value,
             apply_local_monitoring,
         )
@@ -7019,6 +7058,12 @@ class AudioLibraryApp:
             save_setting("accent_color", accent_value.get())
             self._apply_saved_accent()
             ttk.Style(self.root).map("Treeview", background=[("selected", ACCENT)])
+            self.play_pause_button.configure(
+                color=ACCENT,
+                hover_color=ACCENT_HOVER,
+            )
+            self.progress.active_color = ACCENT
+            self.progress._draw()
             self.refresh_people()
             self.track_table.refresh_style()
             self.status_text.set("Колір акценту збережено; усі елементи оновляться після перезапуску")

@@ -57,7 +57,7 @@ UK_TO_EN = {
     "Відновити бібліотеку": "Restore library",
     "Відтворення": "Playback",
     "Відтворення запису повністю зупинено": "Recording playback stopped completely",
-    "Відтворювати у вибрані навушники записи з віртуального мікрофона, не спрямовуючи копію назад у VB-CABLE.": "Play virtual-microphone recordings through the selected headphones without routing a copy back to VB-CABLE.",
+    "Відтворювати у вибрані навушники записи з віртуального мікрофона, не спрямовуючи копію назад у VB-CABLE. Вимкніть під час демонстрації екрана, якщо Discord захоплює локальний звук удруге.": "Play virtual-microphone recordings through the selected headphones without routing a copy back to VB-CABLE. Disable this during screen sharing if Discord captures the local sound a second time.",
     "Віртуальний мікрофон": "Virtual microphone",
     "Віртуальний мікрофон працює у сумісному режимі VB-CABLE": "The virtual microphone is running in VB-CABLE compatibility mode",
     "Віртуальний мікрофон працює; звук виключено із захоплення демонстрації": "The virtual microphone is running; audio is excluded from screen-share capture",

@@ -5,7 +5,7 @@
 
 AudioLib is a local audio library for Windows with categories, global hotkeys, system-tray controls, and optional audio routing to a virtual microphone through VB-CABLE.
 
-Current version: **2.8.0**.
+Current version: **2.8.1**.
 
 ## Features
 
