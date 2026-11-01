@@ -47,6 +47,7 @@ from .i18n import get_language, set_language, tr
 from .player import PlayerError, WindowsMediaPlayer, list_output_devices
 from .startup import register_autostart, unregister_autostart
 from .storage import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, LibraryStore, Person, Track
+from .updates import GitHubUpdateManager, ReleaseInfo, UpdateError
 from .virtual_audio import (
     DRIVER_PAGE,
     VirtualAudioError,
@@ -1841,6 +1842,16 @@ class AudioLibraryApp:
         self.app_settings = self._load_app_settings()
         set_language(str(self.app_settings["language"]))
         self.restart_requested = False
+        self.update_command: list[str] | None = None
+        self.update_manager = GitHubUpdateManager(__version__)
+        self.available_update: ReleaseInfo | None = None
+        self._update_check_in_progress = False
+        self._update_download_in_progress = False
+        self._update_progress_percent = 0
+        self._update_state = "idle"
+        self._update_error = ""
+        self._update_settings_refresh = None
+        self.update_manager.cleanup_stale_downloads()
         self._apply_saved_accent()
         self.start_hidden = start_hidden
         self.store = LibraryStore(root_dir)
@@ -1991,6 +2002,8 @@ class AudioLibraryApp:
             self.root.withdraw()
         if self.app_settings["auto_virtual_microphone"]:
             self.root.after_idle(self._start_virtual_microphone_background)
+        if self.app_settings["check_updates_on_startup"]:
+            self.root.after_idle(self._check_for_updates)
         self.root.after(400, self._update_progress)
         self._install_session_end_handler()
         atexit.register(self._shutdown_audio_routing)
@@ -2023,6 +2036,7 @@ class AudioLibraryApp:
             "photo_size": 92,
             "list_density": "comfortable",
             "window_geometry": None,
+            "check_updates_on_startup": True,
         }
         try:
             payload = json.loads(self.app_settings_path.read_text(encoding="utf-8"))
@@ -2042,6 +2056,7 @@ class AudioLibraryApp:
             ("auto_virtual_microphone", False),
             ("normalize_loudness", True),
             ("local_monitoring", True),
+            ("check_updates_on_startup", True),
         ):
             if not isinstance(defaults[key], bool):
                 defaults[key] = fallback
@@ -5603,6 +5618,159 @@ class AudioLibraryApp:
         self.status_text.set("Звук у віртуальному мікрофоні зупинено")
         self.refresh_tracks()
 
+    def _refresh_update_settings(self) -> None:
+        callback = self._update_settings_refresh
+        if callback is None:
+            return
+        try:
+            callback()
+        except tk.TclError:
+            self._update_settings_refresh = None
+
+    def _check_for_updates(self, manual: bool = False) -> None:
+        if self._update_check_in_progress or self._update_download_in_progress:
+            self._refresh_update_settings()
+            return
+        self._update_check_in_progress = True
+        self._update_state = "checking"
+        self._update_error = ""
+        self._refresh_update_settings()
+
+        def worker() -> None:
+            release = None
+            error = None
+            try:
+                release = self.update_manager.check_latest()
+            except Exception as caught:
+                error = caught
+            if self._closing_event.is_set():
+                return
+            try:
+                self.root.after(
+                    0,
+                    lambda: self._finish_update_check(release, error, manual),
+                )
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_update_check(
+        self,
+        release: ReleaseInfo | None,
+        error: Exception | None,
+        manual: bool,
+    ) -> None:
+        self._update_check_in_progress = False
+        if error is not None:
+            self._update_state = "error"
+            self._update_error = str(error)
+            if manual:
+                self.status_text.set("Не вдалося перевірити оновлення")
+        elif release is None:
+            self.available_update = None
+            self._update_state = "current"
+            if manual:
+                self.status_text.set("Установлено найновішу версію AudioLib")
+        else:
+            self.available_update = release
+            self._update_state = "available"
+            self.status_text.set(
+                tr("Доступне оновлення AudioLib {version}").format(
+                    version=release.version
+                )
+            )
+        self._refresh_update_settings()
+
+    def _install_available_update(self, parent: tk.Misc) -> None:
+        release = self.available_update
+        if release is None or self._update_download_in_progress:
+            return
+        if not getattr(sys, "frozen", False):
+            if release.page_url:
+                webbrowser.open(release.page_url)
+            _showinfo(
+                "Оновлення AudioLib",
+                "Автоматичне встановлення доступне у зібраній версії AudioLib. Сторінку релізу відкрито у браузері.",
+                parent=parent,
+            )
+            return
+        question = tr(
+            "Завантажити й установити AudioLib {version}? Програма автоматично перезапуститься, а бібліотека та налаштування залишаться без змін."
+        ).format(version=release.version)
+        if not _askyesno(
+            "Оновлення AudioLib",
+            question,
+            parent=parent,
+        ):
+            return
+
+        self._update_download_in_progress = True
+        self._update_progress_percent = 0
+        self._update_state = "downloading"
+        self._update_error = ""
+        self._refresh_update_settings()
+
+        def progress(downloaded: int, total: int) -> None:
+            percent = max(0, min(100, int(downloaded * 100 / max(1, total))))
+            if percent == self._update_progress_percent or self._closing_event.is_set():
+                return
+            try:
+                self.root.after(0, lambda value=percent: update_progress(value))
+            except tk.TclError:
+                pass
+
+        def update_progress(percent: int) -> None:
+            self._update_progress_percent = percent
+            self._refresh_update_settings()
+
+        def worker() -> None:
+            package = None
+            error = None
+            try:
+                package = self.update_manager.download(release, progress)
+            except Exception as caught:
+                error = caught
+            if self._closing_event.is_set():
+                return
+            try:
+                self.root.after(
+                    0,
+                    lambda: download_finished(package, error),
+                )
+            except tk.TclError:
+                pass
+
+        def download_finished(
+            package: Path | None,
+            error: Exception | None,
+        ) -> None:
+            self._update_download_in_progress = False
+            if error is not None or package is None:
+                self._update_state = "error"
+                self._update_error = str(error or UpdateError("Невідома помилка"))
+                self._refresh_update_settings()
+                _showerror("Оновлення AudioLib", self._update_error, parent=parent)
+                return
+            try:
+                self.update_command = self.update_manager.prepare_installer(
+                    package,
+                    self.root_dir,
+                    os.getpid(),
+                )
+            except (OSError, UpdateError) as caught:
+                self._update_state = "error"
+                self._update_error = str(caught)
+                self._refresh_update_settings()
+                _showerror("Оновлення AudioLib", self._update_error, parent=parent)
+                return
+            self._update_state = "installing"
+            self.status_text.set("Встановлення оновлення…")
+            self._refresh_update_settings()
+            self._close()
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def open_virtual_microphone_setup(self) -> None:
         existing = getattr(self, "settings_window", None)
         if existing is not None:
@@ -5631,6 +5799,7 @@ class AudioLibraryApp:
         def close_settings() -> None:
             if getattr(self, "settings_window", None) is window:
                 self.settings_window = None
+            self._update_settings_refresh = None
             window.destroy()
 
         window._audiolib_close_callback = close_settings
@@ -5734,6 +5903,9 @@ class AudioLibraryApp:
         accent_value = tk.StringVar(value=str(self.app_settings["accent_color"]))
         photo_size_value = tk.StringVar()
         density_value = tk.StringVar()
+        check_updates_value = tk.BooleanVar(
+            value=bool(self.app_settings["check_updates_on_startup"])
+        )
 
         def save_setting(name: str, value: object) -> None:
             self.app_settings[name] = value
@@ -6566,6 +6738,95 @@ class AudioLibraryApp:
         appearance_choice(0, "Колір акценту", accent_value, list(ACCENT_PRESETS), apply_accent)
         appearance_choice(1, "Розмір зображень", photo_size_value, list(photo_labels), apply_photo_size)
         appearance_choice(2, "Щільність списків", density_value, list(density_labels), apply_density)
+
+        add_section_heading("Оновлення")
+        update_panel = tk.Frame(content, bg=PANEL, padx=14, pady=10)
+        update_panel.pack(fill="x", padx=22)
+        switch_row(
+            update_panel,
+            "Перевіряти оновлення під час запуску",
+            "Перевірка виконується у фоні й не затримує запуск програми.",
+            check_updates_value,
+            lambda: save_setting(
+                "check_updates_on_startup", check_updates_value.get()
+            ),
+        )
+        update_action_row = tk.Frame(update_panel, bg=PANEL)
+        update_action_row.pack(fill="x", pady=(8, 0))
+        update_labels = tk.Frame(update_action_row, bg=PANEL)
+        update_labels.pack(side="left", fill="x", expand=True)
+        LocalizedLabel(
+            update_labels,
+            text=tr("Поточна версія: {version}").format(version=__version__),
+            bg=PANEL,
+            fg=TEXT,
+            anchor="w",
+            font=("Segoe UI Semibold", 10),
+        ).pack(fill="x")
+        update_status = LocalizedStringVar(value="Оновлення ще не перевірялися.")
+        LocalizedLabel(
+            update_labels,
+            textvariable=update_status,
+            bg=PANEL,
+            fg=MUTED,
+            anchor="w",
+            justify="left",
+            wraplength=355,
+            font=("Segoe UI", 9),
+        ).pack(fill="x", pady=(2, 0))
+
+        def update_button_action() -> None:
+            if self._update_state == "available" and self.available_update is not None:
+                self._install_available_update(window)
+            else:
+                self._check_for_updates(manual=True)
+
+        update_button = self._button(
+            update_action_row,
+            "Перевірити оновлення",
+            update_button_action,
+            "#475569",
+        )
+        update_button.pack(side="right", padx=(12, 0))
+
+        def refresh_update_controls() -> None:
+            state = self._update_state
+            release = self.available_update
+            if state == "checking":
+                update_status.set("Перевірка оновлень…")
+                update_button.configure(text="Перевірка…", state="disabled")
+            elif state == "downloading":
+                update_status.set(
+                    tr("Завантаження оновлення: {percent}%").format(
+                        percent=self._update_progress_percent
+                    )
+                )
+                update_button.configure(text="Завантаження…", state="disabled")
+            elif state == "installing":
+                update_status.set("Підготовка до перезапуску…")
+                update_button.configure(text="Встановлення…", state="disabled")
+            elif state == "available" and release is not None:
+                update_status.set(
+                    tr("Доступна нова версія: {version}").format(
+                        version=release.version
+                    )
+                )
+                update_button.configure(
+                    text=tr("Оновити до {version}").format(version=release.version),
+                    state="normal",
+                )
+            elif state == "current":
+                update_status.set("Установлено найновішу версію AudioLib.")
+                update_button.configure(text="Перевірити ще раз", state="normal")
+            elif state == "error":
+                update_status.set(self._update_error or "Не вдалося перевірити оновлення.")
+                update_button.configure(text="Повторити", state="normal")
+            else:
+                update_status.set("Оновлення ще не перевірялися.")
+                update_button.configure(text="Перевірити оновлення", state="normal")
+
+        self._update_settings_refresh = refresh_update_controls
+        refresh_update_controls()
 
         about_header = tk.Frame(content, bg=BG)
         about_header.pack(fill="x", padx=22, pady=(18, 8))

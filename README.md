@@ -23,7 +23,8 @@ Current version: **2.6.3**.
 - saved window size and interface preferences;
 - optional routing of microphone input and audio recordings to VB-CABLE;
 - selection of the physical microphone, output device, and latency/stability mode;
-- automatic recovery of Windows audio routing after an unexpected shutdown.
+- automatic recovery of Windows audio routing after an unexpected shutdown;
+- background update checks and secure in-app installation from GitHub Releases without replacing the local library.
 
 All images, recordings, database files, and settings are stored locally in the `data` directory and are never sent to the developer.
 
@@ -82,6 +83,7 @@ The `data` directory is excluded through `.gitignore`, so personal recordings an
 - `audiolib/virtual_audio.py` — VB-CABLE integration;
 - `audiolib/audio_endpoints.py` — Windows audio routing;
 - `audiolib/library_tools.py` — backup and restore;
+- `audiolib/updates.py` — GitHub Release checks, package verification, and safe application updates;
 - `build_hooks/` — PyInstaller packaging configuration;
 - `assets/` — application icons.
 

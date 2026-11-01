@@ -146,7 +146,17 @@ if __name__ == "__main__":
     finally:
         if event_handle:
             kernel32.CloseHandle(event_handle)
-    if app.restart_requested:
+    if app.update_command:
+        creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        try:
+            subprocess.Popen(
+                app.update_command,
+                cwd=application_root,
+                creationflags=creation_flags,
+            )
+        except OSError:
+            subprocess.Popen([sys.executable], cwd=application_root)
+    elif app.restart_requested:
         if getattr(sys, "frozen", False):
             restart_command = [sys.executable]
         else:
