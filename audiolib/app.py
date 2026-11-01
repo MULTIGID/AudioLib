@@ -6817,7 +6817,7 @@ class AudioLibraryApp:
                 )
             elif state == "current":
                 update_status.set("Установлено найновішу версію AudioLib.")
-                update_button.configure(text="Перевірити ще раз", state="normal")
+                update_button.configure(text="Перевірити оновлення", state="normal")
             elif state == "error":
                 update_status.set(self._update_error or "Не вдалося перевірити оновлення.")
                 update_button.configure(text="Повторити", state="normal")

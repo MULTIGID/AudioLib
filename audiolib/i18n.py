@@ -158,7 +158,6 @@ UK_TO_EN = {
     "Автоматичне встановлення доступне лише у зібраній версії AudioLib.": "Automatic installation is available only in the packaged version of AudioLib.",
     "У сховищі Windows не знайдено кореневих сертифікатів.": "No root certificates were found in the Windows certificate store.",
     "Перевірити оновлення": "Check for updates",
-    "Перевірити ще раз": "Check again",
     "Перевірка оновлень…": "Checking for updates…",
     "Перевірка…": "Checking…",
     "Перевірка виконується у фоні й не затримує запуск програми.": "The check runs in the background and does not delay application startup.",
