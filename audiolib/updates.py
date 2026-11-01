@@ -19,6 +19,9 @@ import zipfile
 
 REPOSITORY = "MULTIGID/AudioLib"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
+LATEST_MANIFEST_URL = (
+    f"https://github.com/{REPOSITORY}/releases/latest/download/update.json"
+)
 MAX_PACKAGE_BYTES = 500 * 1024 * 1024
 MAX_UNPACKED_BYTES = 1024 * 1024 * 1024
 
@@ -98,7 +101,55 @@ class GitHubUpdateManager:
             },
         )
 
-    def check_latest(self) -> ReleaseInfo | None:
+    def _release_from_manifest(self, payload: object) -> ReleaseInfo | None:
+        if not isinstance(payload, dict) or payload.get("schema") != 1:
+            raise UpdateError("GitHub повернув некоректний маніфест оновлення.")
+        version = str(payload.get("version", ""))
+        _version_tuple(version)
+        tag = str(payload.get("tag", f"v{version}"))
+        if tag != f"v{version}":
+            raise UpdateError("Версія в маніфесті оновлення не збігається з тегом.")
+        if not is_newer_version(version, self.current_version):
+            return None
+        download_url = str(payload.get("download_url", ""))
+        expected_url = (
+            f"https://github.com/{REPOSITORY}/releases/download/"
+            f"{tag}/AudioLib_{version}.zip"
+        )
+        if download_url != expected_url:
+            raise UpdateError("Маніфест містить неприпустиму адресу завантаження.")
+        digest = str(payload.get("sha256", "")).lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise UpdateError("Маніфест не містить коректної суми SHA-256.")
+        try:
+            size = int(payload.get("size", 0))
+        except (TypeError, ValueError):
+            size = 0
+        if size <= 0 or size > MAX_PACKAGE_BYTES:
+            raise UpdateError("Розмір пакета в маніфесті є некоректним.")
+        page_url = str(payload.get("page_url", ""))
+        if page_url != f"https://github.com/{REPOSITORY}/releases/tag/{tag}":
+            raise UpdateError("Маніфест містить неприпустиму адресу релізу.")
+        return ReleaseInfo(
+            version=version,
+            tag=tag,
+            download_url=download_url,
+            digest=digest,
+            size=size,
+            page_url=page_url,
+            notes=str(payload.get("notes", "")),
+        )
+
+    def _check_latest_manifest(self) -> ReleaseInfo | None:
+        with urllib.request.urlopen(
+            self._request(LATEST_MANIFEST_URL),
+            timeout=20,
+            context=self._context(),
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        return self._release_from_manifest(payload)
+
+    def _check_latest_api(self) -> ReleaseInfo | None:
         try:
             with urllib.request.urlopen(
                 self._request(LATEST_RELEASE_API),
@@ -158,6 +209,18 @@ class GitHubUpdateManager:
             notes=str(payload.get("body", "")),
         )
 
+    def check_latest(self) -> ReleaseInfo | None:
+        try:
+            return self._check_latest_manifest()
+        except (OSError, ValueError, urllib.error.URLError, UpdateError) as manifest_error:
+            try:
+                return self._check_latest_api()
+            except UpdateError as api_error:
+                raise UpdateError(
+                    "Не вдалося перевірити оновлення через маніфест або GitHub API: "
+                    f"{manifest_error}; {api_error}"
+                ) from api_error
+
     def download(
         self,
         release: ReleaseInfo,
@@ -213,14 +276,19 @@ class GitHubUpdateManager:
                     path = Path(name)
                     if path.is_absolute() or ".." in path.parts:
                         raise UpdateError("Пакет оновлення містить небезпечний шлях.")
-                    if name.casefold().startswith("audiolib/data/"):
+                    normalized = name.casefold()
+                    if normalized.startswith("audiolib/data/") or normalized.startswith("data/"):
                         raise UpdateError("Пакет оновлення не повинен містити дані користувача.")
-                if "AudioLib/AudioLib.exe" not in files:
+                wrapped = (
+                    "AudioLib/AudioLib.exe" in files
+                    and any(name.startswith("AudioLib/_internal/") for name in files)
+                )
+                flat = (
+                    "AudioLib.exe" in files
+                    and any(name.startswith("_internal/") for name in files)
+                )
+                if not wrapped and not flat:
                     raise UpdateError("У пакеті оновлення відсутній AudioLib.exe.")
-                if not any(
-                    name.startswith("AudioLib/_internal/") for name in files
-                ):
-                    raise UpdateError("Пакет оновлення не містить службових файлів.")
         except (OSError, zipfile.BadZipFile) as error:
             raise UpdateError(f"Не вдалося перевірити пакет оновлення: {error}") from error
 
@@ -281,13 +349,10 @@ $ErrorActionPreference = "Stop"
 $logPath = Join-Path $InstallDir "data\update.log"
 $extractDir = Join-Path $WorkDir "extracted"
 $backupDir = Join-Path $WorkDir "backup"
-$newRoot = Join-Path $extractDir "AudioLib"
 $oldExe = Join-Path $InstallDir "AudioLib.exe"
 $oldInternal = Join-Path $InstallDir "_internal"
 $backupExe = Join-Path $backupDir "AudioLib.exe"
 $backupInternal = Join-Path $backupDir "_internal"
-$newExe = Join-Path $newRoot "AudioLib.exe"
-$newInternal = Join-Path $newRoot "_internal"
 $exeBackedUp = $false
 $internalBackedUp = $false
 $newExeInstalled = $false
@@ -298,6 +363,15 @@ try {
     New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
     New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
     Expand-Archive -LiteralPath $PackagePath -DestinationPath $extractDir -Force
+    $wrappedRoot = Join-Path $extractDir "AudioLib"
+    if (Test-Path -LiteralPath (Join-Path $wrappedRoot "AudioLib.exe")) {
+        $newRoot = $wrappedRoot
+    }
+    else {
+        $newRoot = $extractDir
+    }
+    $newExe = Join-Path $newRoot "AudioLib.exe"
+    $newInternal = Join-Path $newRoot "_internal"
     if (-not (Test-Path -LiteralPath $newExe) -or -not (Test-Path -LiteralPath $newInternal)) {
         throw "The update package has an invalid structure."
     }
