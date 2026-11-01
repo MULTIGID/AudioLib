@@ -141,8 +141,12 @@ class GitHubUpdateManager:
         )
 
     def _check_latest_manifest(self) -> ReleaseInfo | None:
+        # GitHub can briefly cache the /latest redirect after a new release.
+        # A unique query keeps clients from accepting the previous release's
+        # otherwise valid manifest and missing an available update.
+        manifest_url = f"{LATEST_MANIFEST_URL}?check={time.time_ns()}"
         with urllib.request.urlopen(
-            self._request(LATEST_MANIFEST_URL),
+            self._request(manifest_url),
             timeout=20,
             context=self._context(),
         ) as response:
