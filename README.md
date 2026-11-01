@@ -1,90 +1,93 @@
 # AudioLib
 
-AudioLib — локальна Windows-бібліотека аудіозаписів із категоріями, гарячими клавішами, керуванням із системного трея та додатковим виведенням звуку у віртуальний мікрофон через VB-CABLE.
+<a href="README.md"><kbd>English</kbd></a>
+<a href="README.uk.md"><kbd>Українська</kbd></a>
 
-Поточна версія: **2.6.2**.
+AudioLib is a local audio library for Windows with categories, global hotkeys, system-tray controls, and optional audio routing to a virtual microphone through VB-CABLE.
 
-## Можливості
+Current version: **2.6.2**.
 
-- категорії з власними зображеннями та лічильниками записів;
-- окремий розділ Favorites;
-- пошук категорій і аудіозаписів;
-- імпорт поширених аудіоформатів;
-- відтворення, пауза, перемотування та регулювання гучності;
-- неруйнівне вирівнювання гучності під час відтворення без зміни вихідних файлів;
-- власні гарячі клавіші для записів із Favorites;
-- змінювана глобальна гаряча клавіша Stop;
-- керування записами з компактного вікна у системному треї;
-- резервне копіювання та імпорт бібліотеки;
-- збереження розміру вікна й налаштувань інтерфейсу;
-- додаткове передавання голосу та аудіозаписів у VB-CABLE;
-- вибір фізичного мікрофона, пристрою виведення та режиму затримки/стабільності;
-- відновлення аудіомаршрутизації після аварійного завершення.
+## Features
 
-Усі фотографії, записи, база даних і налаштування зберігаються локально у папці `data` та не надсилаються розробнику.
+- categories with custom images and track counters;
+- a dedicated Favorites section;
+- category and audio-recording search;
+- import of common audio formats;
+- playback, pause, seeking, and volume controls;
+- non-destructive loudness normalization during playback without modifying source files;
+- custom global hotkeys for recordings in Favorites;
+- a configurable global Stop hotkey;
+- playback controls in a compact system-tray window;
+- library backup and restore;
+- saved window size and interface preferences;
+- optional routing of microphone input and audio recordings to VB-CABLE;
+- selection of the physical microphone, output device, and latency/stability mode;
+- automatic recovery of Windows audio routing after an unexpected shutdown.
 
-## Готова версія для Windows
+All images, recordings, database files, and settings are stored locally in the `data` directory and are never sent to the developer.
 
-Завантажте останній ZIP у розділі [Releases](../../releases/latest), розпакуйте його у звичайну папку та запустіть `AudioLib.exe`.
+## Ready-to-use Windows build
 
-Не запускайте програму безпосередньо всередині ZIP-архіву.
+Download the latest ZIP archive from [Releases](../../releases/latest), extract it to a regular folder, and run `AudioLib.exe`.
 
-## Запуск із вихідного коду
+Do not run the application directly from inside the ZIP archive.
 
-Потрібні Windows 10/11 та Python 3.11 або новіший.
+## Running from source
 
-1. Завантажте або клонуйте репозиторій.
-2. Запустіть `install.bat` один раз.
-3. Надалі запускайте програму через `launch.bat`.
+Windows 10/11 and Python 3.11 or newer are required.
 
-Віртуальне середовище `.venv` і папка `data` створюються локально та не додаються до Git.
+1. Download or clone the repository.
+2. Run `install.bat` once.
+3. Use `launch.bat` to start the application afterward.
 
-## Збірка EXE
+The `.venv` environment and the `data` directory are created locally and are not committed to Git.
 
-Після встановлення залежностей запустіть `build_exe.bat`.
+## Building the EXE
 
-Готова збірка з'явиться у папці `dist/AudioLib`. Папки `build`, `dist` і ZIP-релізи виключені з репозиторію; готовий архів слід публікувати через GitHub Releases.
+After installing the dependencies, run `build_exe.bat`.
 
-## Віртуальний мікрофон
+The packaged application will be created in `dist/AudioLib`. The `build` and `dist` directories and release ZIP archives are excluded from the repository; publish the finished archive through GitHub Releases.
 
-Функція віртуального мікрофона є необов'язковою. AudioLib використовує офіційний драйвер [VB-CABLE](https://vb-audio.com/Cable/) від VB-Audio і не включає його до цього репозиторію.
+## Virtual microphone
 
-1. Відкрийте `Налаштування` → `Віртуальний мікрофон`.
-2. Встановіть VB-CABLE за допомогою відповідної кнопки та підтвердьте запит Windows.
-3. Після встановлення перезавантажте комп'ютер.
-4. Виберіть фізичний мікрофон у налаштуваннях AudioLib.
-5. За потреби ввімкніть віртуальний мікрофон і використовуйте кнопки відтворення у відповідному стовпці таблиці.
+Virtual-microphone support is optional. AudioLib uses the official [VB-CABLE](https://vb-audio.com/Cable/) driver by VB-Audio and does not bundle that driver in this repository.
 
-AudioLib не повинна автоматично вмикати віртуальний мікрофон без дозволу користувача. Відповідний перемикач у налаштуваннях вимкнений за замовчуванням.
+1. Open `Settings` → `Virtual microphone`.
+2. Install VB-CABLE with the provided button and approve the Windows prompt.
+3. Restart the computer after installation.
+4. Select the physical microphone in AudioLib settings.
+5. Enable the virtual microphone when needed and use the playback controls in the corresponding table column.
 
-## Дані користувача
+AudioLib does not enable the virtual microphone automatically without the user's permission. The corresponding setting is disabled by default.
 
-- база бібліотеки: `data/library.sqlite3`;
-- зображення та аудіозаписи: `data/people/`;
-- локальні налаштування: JSON-файли у `data/`.
+## User data
 
-Для ручної резервної копії достатньо скопіювати папку `data`. Також можна скористатися вбудованими функціями створення та імпорту резервної копії.
+- library database: `data/library.sqlite3`;
+- category images and audio recordings: `data/people/`;
+- local preferences: JSON files in `data/`.
 
-Папка `data` виключена через `.gitignore`, тому особисті записи й налаштування не потрапляють до репозиторію.
+For a manual backup, copy the entire `data` directory. You can also use the built-in backup and restore features.
 
-## Структура проєкту
+The `data` directory is excluded through `.gitignore`, so personal recordings and settings are never included in the repository.
 
-- `main.py` — точка запуску програми;
-- `audiolib/app.py` — головний інтерфейс і налаштування;
-- `audiolib/storage.py` — база даних і файли бібліотеки;
-- `audiolib/player.py` — локальне відтворення;
-- `audiolib/loudness.py` — аналіз і вирівнювання гучності;
-- `audiolib/hotkeys.py` — глобальні гарячі клавіші;
-- `audiolib/virtual_audio.py` — робота з VB-CABLE;
-- `audiolib/audio_endpoints.py` — аудіомаршрутизація Windows;
-- `audiolib/library_tools.py` — резервні копії та імпорт;
-- `build_hooks/` — налаштування складу PyInstaller-збірки;
-- `assets/` — іконки програми.
+## Project structure
 
-## Автор
+- `main.py` — application entry point;
+- `audiolib/app.py` — main interface and settings;
+- `audiolib/storage.py` — library database and files;
+- `audiolib/player.py` — local audio playback;
+- `audiolib/loudness.py` — loudness analysis and normalization;
+- `audiolib/hotkeys.py` — global hotkeys;
+- `audiolib/virtual_audio.py` — VB-CABLE integration;
+- `audiolib/audio_endpoints.py` — Windows audio routing;
+- `audiolib/library_tools.py` — backup and restore;
+- `build_hooks/` — PyInstaller packaging configuration;
+- `assets/` — application icons.
+
+## Author
 
 MULTIGID.
 
-## Ліцензія
+## License
 
-Ліцензію ще не вибрано. До її додавання стандартне авторське право зберігається за автором проєкту.
+No license has been selected yet. Until a license is added, standard copyright restrictions apply.
