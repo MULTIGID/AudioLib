@@ -5917,7 +5917,7 @@ class AudioLibraryApp:
             language_controls,
             textvariable=language_value,
             command=apply_language,
-            width=520,
+            width=360,
         )
         language_dropdown.configure(values=language_labels)
         language_dropdown.current(language_keys.index(current_language))
