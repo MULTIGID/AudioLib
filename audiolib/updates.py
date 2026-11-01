@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import ssl
 import sys
 import tempfile
 import time
@@ -48,10 +49,36 @@ def is_newer_version(candidate: str, current: str) -> bool:
     return _version_tuple(candidate) > _version_tuple(current)
 
 
+def _create_ssl_context() -> ssl.SSLContext:
+    context = ssl.create_default_context()
+    if sys.platform != "win32" or not hasattr(ssl, "enum_certificates"):
+        return context
+    certificates: list[str] = []
+    try:
+        for certificate, encoding, _trust in ssl.enum_certificates("ROOT"):
+            if encoding == "x509_asn":
+                certificates.append(ssl.DER_cert_to_PEM_cert(certificate))
+        if certificates:
+            context.load_verify_locations(cadata="\n".join(certificates))
+    except (OSError, ssl.SSLError, ValueError) as error:
+        raise UpdateError(
+            f"Не вдалося завантажити сертифікати Windows: {error}"
+        ) from error
+    if not certificates:
+        raise UpdateError("У сховищі Windows не знайдено кореневих сертифікатів.")
+    return context
+
+
 class GitHubUpdateManager:
     def __init__(self, current_version: str) -> None:
         self.current_version = current_version
         self._updates_root = Path(tempfile.gettempdir()) / "AudioLibUpdates"
+        self._ssl_context: ssl.SSLContext | None = None
+
+    def _context(self) -> ssl.SSLContext:
+        if self._ssl_context is None:
+            self._ssl_context = _create_ssl_context()
+        return self._ssl_context
 
     @staticmethod
     def _request(url: str) -> urllib.request.Request:
@@ -67,7 +94,9 @@ class GitHubUpdateManager:
     def check_latest(self) -> ReleaseInfo | None:
         try:
             with urllib.request.urlopen(
-                self._request(LATEST_RELEASE_API), timeout=20
+                self._request(LATEST_RELEASE_API),
+                timeout=20,
+                context=self._context(),
             ) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except (OSError, ValueError, urllib.error.URLError) as error:
@@ -135,7 +164,9 @@ class GitHubUpdateManager:
         downloaded = 0
         try:
             with urllib.request.urlopen(
-                self._request(release.download_url), timeout=30
+                self._request(release.download_url),
+                timeout=30,
+                context=self._context(),
             ) as response, temporary.open("wb") as output:
                 while True:
                     chunk = response.read(1024 * 1024)
