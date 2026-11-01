@@ -7,13 +7,31 @@ import sqlite3
 import uuid
 import zipfile
 from pathlib import Path
+from typing import Callable
 
 
 class LibraryToolError(RuntimeError):
     pass
 
 
-def create_backup(root: Path, destination: Path | None = None) -> Path:
+ProgressCallback = Callable[[str, int, int], None]
+
+
+def _report_progress(
+    callback: ProgressCallback | None,
+    stage: str,
+    completed: int,
+    total: int,
+) -> None:
+    if callback is not None:
+        callback(stage, completed, total)
+
+
+def create_backup(
+    root: Path,
+    destination: Path | None = None,
+    progress: ProgressCallback | None = None,
+) -> Path:
     data_dir = root / "data"
     database = data_dir / "library.sqlite3"
     if not database.is_file():
@@ -28,14 +46,31 @@ def create_backup(root: Path, destination: Path | None = None) -> Path:
         destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(destination.name + ".tmp")
     try:
+        files = [
+            path
+            for path in data_dir.rglob("*")
+            if path.is_file() and path.name not in {"audio_routing.log"}
+        ]
+        total = sum(path.stat().st_size for path in files)
+        completed = 0
+        _report_progress(progress, "preparing", completed, total)
         with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr(
                 "backup_manifest.json",
                 json.dumps({"format": 1, "created_at": datetime.now().isoformat()}),
             )
-            for path in data_dir.rglob("*"):
-                if path.is_file() and path.name not in {"audio_routing.log"}:
-                    archive.write(path, (Path("data") / path.relative_to(data_dir)).as_posix())
+            for path in files:
+                archive_name = (
+                    Path("data") / path.relative_to(data_dir)
+                ).as_posix()
+                info = zipfile.ZipInfo.from_file(path, archive_name)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                with path.open("rb") as input_stream, archive.open(info, "w") as output_stream:
+                    while chunk := input_stream.read(1024 * 1024):
+                        output_stream.write(chunk)
+                        completed += len(chunk)
+                        _report_progress(progress, "copying", completed, total)
+        _report_progress(progress, "finalizing", total, total)
         temporary.replace(destination)
     except (OSError, zipfile.BadZipFile) as error:
         temporary.unlink(missing_ok=True)
@@ -57,7 +92,11 @@ def _safe_members(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
     return members
 
 
-def restore_backup(root: Path, source: Path) -> None:
+def restore_backup(
+    root: Path,
+    source: Path,
+    progress: ProgressCallback | None = None,
+) -> None:
     if not source.is_file():
         raise LibraryToolError("Файл резервної копії не знайдено")
     stage = root / f".restore_{uuid.uuid4().hex}"
@@ -67,21 +106,30 @@ def restore_backup(root: Path, source: Path) -> None:
         stage.mkdir()
         with zipfile.ZipFile(source) as archive:
             members = _safe_members(archive)
+            total = sum(item.file_size for item in members)
+            completed = 0
+            _report_progress(progress, "preparing", completed, total)
             for item in members:
                 relative = Path(item.filename).relative_to("data")
                 destination = stage / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 with archive.open(item) as input_stream, destination.open("wb") as output_stream:
-                    shutil.copyfileobj(input_stream, output_stream)
+                    while chunk := input_stream.read(1024 * 1024):
+                        output_stream.write(chunk)
+                        completed += len(chunk)
+                        _report_progress(progress, "copying", completed, total)
+        _report_progress(progress, "verifying", 0, 0)
         database = stage / "library.sqlite3"
         with sqlite3.connect(database) as connection:
             result = connection.execute("PRAGMA integrity_check").fetchone()
             if not result or str(result[0]).casefold() != "ok":
                 raise LibraryToolError("Перевірка бази даних у копії завершилася помилкою")
+        _report_progress(progress, "applying", 0, 0)
         if data_dir.exists():
             data_dir.replace(previous)
         shutil.copytree(stage, data_dir)
         shutil.rmtree(previous, ignore_errors=True)
+        _report_progress(progress, "finalizing", total, total)
     except Exception as error:
         if previous.exists():
             shutil.rmtree(data_dir, ignore_errors=True)

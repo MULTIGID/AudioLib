@@ -1835,6 +1835,155 @@ class CustomTrackTable(tk.Frame):
                     )
 
 
+class OperationProgressDialog:
+    """Small modal progress window shared by long-running operations."""
+
+    def __init__(
+        self,
+        app: "AudioLibraryApp",
+        parent: tk.Misc,
+        title: str,
+        initial_stage: str,
+    ) -> None:
+        self.app = app
+        self.parent = parent
+        self.window = tk.Toplevel(app.root)
+        self.window.title(tr(title))
+        self.window.configure(bg=BG)
+        self.window.resizable(False, False)
+        self.window.transient(parent)
+        self.window._audiolib_close_allowed = False
+
+        width, height = 500, 210
+        parent.update_idletasks()
+        x = parent.winfo_rootx() + max(0, (parent.winfo_width() - width) // 2)
+        y = parent.winfo_rooty() + max(0, (parent.winfo_height() - height) // 2)
+        self.window.geometry(f"{width}x{height}+{x}+{y}")
+        app._build_secondary_title_bar(self.window, title)
+        self.window._audiolib_close_allowed = False
+
+        content = tk.Frame(self.window, bg=BG, padx=22, pady=20)
+        content.pack(fill="both", expand=True)
+        self.stage = LocalizedStringVar(value=initial_stage)
+        LocalizedLabel(
+            content,
+            textvariable=self.stage,
+            bg=BG,
+            fg=TEXT,
+            anchor="w",
+            font=("Segoe UI Semibold", 11),
+        ).pack(fill="x")
+
+        progress_row = tk.Frame(content, bg=BG)
+        progress_row.pack(fill="x", pady=(15, 8))
+        self.progress = ttk.Progressbar(
+            progress_row,
+            mode="determinate",
+            maximum=100,
+            style="Settings.Horizontal.TProgressbar",
+        )
+        self.progress.pack(side="left", fill="x", expand=True)
+        self.percent = tk.StringVar(value="0%")
+        tk.Label(
+            progress_row,
+            textvariable=self.percent,
+            bg=BG,
+            fg=TEXT,
+            width=6,
+            anchor="e",
+            font=("Segoe UI Semibold", 9),
+        ).pack(side="right", padx=(12, 0))
+
+        self.detail = LocalizedStringVar(value="Підготовка операції…")
+        LocalizedLabel(
+            content,
+            textvariable=self.detail,
+            bg=BG,
+            fg=MUTED,
+            anchor="w",
+            font=("Segoe UI", 9),
+        ).pack(fill="x")
+        self._indeterminate = False
+        self.window.update_idletasks()
+        try:
+            self.window.grab_set()
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _format_bytes(value: int) -> str:
+        amount = float(max(0, value))
+        units = ("B", "KB", "MB", "GB") if get_language() == "en" else (
+            "Б",
+            "КБ",
+            "МБ",
+            "ГБ",
+        )
+        for unit in units:
+            if amount < 1024 or unit == units[-1]:
+                if unit == "Б":
+                    return f"{int(amount)} {unit}"
+                return f"{amount:.1f} {unit}"
+            amount /= 1024
+        return f"{int(value)} Б"
+
+    def set_indeterminate(self, stage: str, detail: str = "") -> None:
+        if not self.exists():
+            return
+        self.stage.set(stage)
+        if detail:
+            self.detail.set(detail)
+        self.percent.set("")
+        if not self._indeterminate:
+            self.progress.configure(mode="indeterminate")
+            self.progress.start(12)
+            self._indeterminate = True
+
+    def set_progress(
+        self,
+        stage: str,
+        completed: int,
+        total: int,
+        detail: str = "",
+    ) -> None:
+        if not self.exists():
+            return
+        if self._indeterminate:
+            self.progress.stop()
+            self.progress.configure(mode="determinate")
+            self._indeterminate = False
+        percent = max(0, min(100, int(completed * 100 / max(1, total))))
+        self.stage.set(stage)
+        self.progress.configure(value=percent)
+        self.percent.set(f"{percent}%")
+        if detail:
+            self.detail.set(detail)
+        elif total > 0:
+            self.detail.set(
+                tr("{completed} із {total}").format(
+                    completed=self._format_bytes(completed),
+                    total=self._format_bytes(total),
+                )
+            )
+
+    def exists(self) -> bool:
+        try:
+            return bool(self.window.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def close(self) -> None:
+        if not self.exists():
+            return
+        if self._indeterminate:
+            self.progress.stop()
+        try:
+            self.window.grab_release()
+        except tk.TclError:
+            pass
+        self.window.destroy()
+
+
 class AudioLibraryApp:
     def __init__(self, root_dir: Path, start_hidden: bool = False) -> None:
         self.root_dir = root_dir
@@ -5716,25 +5865,62 @@ class AudioLibraryApp:
         self._update_state = "downloading"
         self._update_error = ""
         self._refresh_update_settings()
+        progress_dialog = OperationProgressDialog(
+            self,
+            parent,
+            "Оновлення AudioLib",
+            "Завантаження оновлення…",
+        )
+        progress_dialog.set_progress(
+            "Завантаження оновлення…",
+            0,
+            release.size,
+        )
 
         def progress(downloaded: int, total: int) -> None:
-            percent = max(0, min(100, int(downloaded * 100 / max(1, total))))
-            if percent == self._update_progress_percent or self._closing_event.is_set():
+            if self._closing_event.is_set():
                 return
             try:
-                self.root.after(0, lambda value=percent: update_progress(value))
+                self.root.after(
+                    0,
+                    lambda current=downloaded, size=total: update_progress(
+                        current,
+                        size,
+                    ),
+                )
             except tk.TclError:
                 pass
 
-        def update_progress(percent: int) -> None:
+        def update_progress(downloaded: int, total: int) -> None:
+            percent = max(0, min(100, int(downloaded * 100 / max(1, total))))
             self._update_progress_percent = percent
+            progress_dialog.set_progress(
+                "Завантаження оновлення…",
+                downloaded,
+                total,
+            )
             self._refresh_update_settings()
 
         def worker() -> None:
-            package = None
+            update_command = None
             error = None
             try:
                 package = self.update_manager.download(release, progress)
+                try:
+                    self.root.after(
+                        0,
+                        lambda: progress_dialog.set_indeterminate(
+                            "Перевірка пакета оновлення…",
+                            "Перевірка цілісності та структури файлів",
+                        ),
+                    )
+                except tk.TclError:
+                    pass
+                update_command = self.update_manager.prepare_installer(
+                    package,
+                    self.root_dir,
+                    os.getpid(),
+                )
             except Exception as caught:
                 error = caught
             if self._closing_event.is_set():
@@ -5742,34 +5928,28 @@ class AudioLibraryApp:
             try:
                 self.root.after(
                     0,
-                    lambda: download_finished(package, error),
+                    lambda: download_finished(update_command, error),
                 )
             except tk.TclError:
                 pass
 
         def download_finished(
-            package: Path | None,
+            update_command: list[str] | None,
             error: Exception | None,
         ) -> None:
             self._update_download_in_progress = False
-            if error is not None or package is None:
+            if error is not None or update_command is None:
+                progress_dialog.close()
                 self._update_state = "error"
                 self._update_error = str(error or UpdateError("Невідома помилка"))
                 self._refresh_update_settings()
                 _showerror("Оновлення AudioLib", self._update_error, parent=parent)
                 return
-            try:
-                self.update_command = self.update_manager.prepare_installer(
-                    package,
-                    self.root_dir,
-                    os.getpid(),
-                )
-            except (OSError, UpdateError) as caught:
-                self._update_state = "error"
-                self._update_error = str(caught)
-                self._refresh_update_settings()
-                _showerror("Оновлення AudioLib", self._update_error, parent=parent)
-                return
+            self.update_command = update_command
+            progress_dialog.set_indeterminate(
+                "Підготовка до перезапуску…",
+                "AudioLib автоматично продовжить установлення після закриття",
+            )
             self._update_state = "installing"
             self.status_text.set("Встановлення оновлення…")
             self._refresh_update_settings()
@@ -6559,18 +6739,58 @@ class AudioLibraryApp:
             destination = Path(selected) / f"AudioLib_backup_{stamp}.zip"
             set_library_busy(True, "Створення резервної копії…")
             self.status_text.set("Створення резервної копії…")
+            progress_dialog = OperationProgressDialog(
+                self,
+                window,
+                "Резервна копія AudioLib",
+                "Підготовка резервної копії…",
+            )
+            progress_dialog.set_indeterminate("Підготовка резервної копії…")
             backup_results: queue.Queue[
                 tuple[Path | None, Exception | None]
             ] = queue.Queue(maxsize=1)
+            backup_progress: queue.Queue[tuple[str, int, int]] = queue.Queue()
+
+            def report_progress(stage: str, completed: int, total: int) -> None:
+                backup_progress.put((stage, completed, total))
+
+            def refresh_backup_progress() -> None:
+                latest = None
+                while True:
+                    try:
+                        latest = backup_progress.get_nowait()
+                    except queue.Empty:
+                        break
+                if latest is None:
+                    return
+                stage, completed, total = latest
+                if stage == "preparing":
+                    progress_dialog.set_indeterminate("Підготовка резервної копії…")
+                elif stage == "copying":
+                    progress_dialog.set_progress(
+                        "Копіювання даних бібліотеки…",
+                        completed,
+                        total,
+                    )
+                else:
+                    progress_dialog.set_indeterminate(
+                        "Завершення резервної копії…",
+                        "Перевірка та збереження архіву",
+                    )
 
             def worker() -> None:
                 try:
-                    result = create_backup(self.root_dir, destination)
+                    result = create_backup(
+                        self.root_dir,
+                        destination,
+                        report_progress,
+                    )
                     backup_results.put((result, None))
                 except Exception as error:
                     backup_results.put((None, error))
 
             def poll_backup_result() -> None:
+                refresh_backup_progress()
                 try:
                     result, error = backup_results.get_nowait()
                 except queue.Empty:
@@ -6580,6 +6800,8 @@ class AudioLibraryApp:
                 backup_finished(result, error)
 
             def backup_finished(result: Path | None, error: Exception | None) -> None:
+                refresh_backup_progress()
+                progress_dialog.close()
                 set_library_busy(False)
                 if error is not None:
                     self.status_text.set("Не вдалося створити резервну копію")
@@ -6628,16 +6850,67 @@ class AudioLibraryApp:
             self.store.close()
             set_library_busy(True, "Імпорт і перевірка резервної копії…")
             self.status_text.set("Імпорт резервної копії…")
+            progress_dialog = OperationProgressDialog(
+                self,
+                window,
+                "Імпорт резервної копії",
+                "Підготовка резервної копії…",
+            )
+            progress_dialog.set_indeterminate("Підготовка резервної копії…")
             import_results: queue.Queue[Exception | None] = queue.Queue(maxsize=1)
+            import_progress: queue.Queue[tuple[str, int, int]] = queue.Queue()
+
+            def report_progress(stage: str, completed: int, total: int) -> None:
+                import_progress.put((stage, completed, total))
+
+            def refresh_import_progress() -> None:
+                latest = None
+                while True:
+                    try:
+                        latest = import_progress.get_nowait()
+                    except queue.Empty:
+                        break
+                if latest is None:
+                    return
+                stage, completed, total = latest
+                if stage == "preparing":
+                    progress_dialog.set_indeterminate("Підготовка резервної копії…")
+                elif stage == "copying":
+                    progress_dialog.set_progress(
+                        "Копіювання даних бібліотеки…",
+                        completed,
+                        total,
+                    )
+                elif stage == "verifying":
+                    progress_dialog.set_indeterminate(
+                        "Перевірка бази даних…",
+                        "Перевірка цілісності резервної копії",
+                    )
+                elif stage == "applying":
+                    progress_dialog.set_indeterminate(
+                        "Застосування резервної копії…",
+                        "Оновлення бібліотеки AudioLib",
+                    )
+                else:
+                    progress_dialog.set_progress(
+                        "Завершення імпорту…",
+                        max(completed, total),
+                        max(1, total),
+                    )
 
             def worker() -> None:
                 try:
-                    restore_backup(self.root_dir, Path(selected[0]))
+                    restore_backup(
+                        self.root_dir,
+                        Path(selected[0]),
+                        report_progress,
+                    )
                     import_results.put(None)
                 except Exception as error:
                     import_results.put(error)
 
             def poll_import_result() -> None:
+                refresh_import_progress()
                 try:
                     error = import_results.get_nowait()
                 except queue.Empty:
@@ -6647,6 +6920,8 @@ class AudioLibraryApp:
                 import_finished(error)
 
             def import_finished(error: Exception | None) -> None:
+                refresh_import_progress()
+                progress_dialog.close()
                 self.store = LibraryStore(self.root_dir)
                 set_library_busy(False)
                 if error is not None:
