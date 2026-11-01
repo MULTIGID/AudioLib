@@ -113,7 +113,7 @@ def prepare_official_installer() -> Path:
     partial = archive.with_suffix(".download")
     request = urllib.request.Request(
         DRIVER_URL,
-        headers={"User-Agent": "AudioLib/2.6.3 (+https://vb-audio.com/Cable/index.htm)"},
+        headers={"User-Agent": "AudioLib/2.7.0 (+https://vb-audio.com/Cable/index.htm)"},
     )
     try:
         with urllib.request.urlopen(request, timeout=30) as response, partial.open("wb") as output:
