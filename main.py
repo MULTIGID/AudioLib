@@ -100,6 +100,16 @@ def _create_instance_event(show_existing: bool):
 
 if __name__ == "__main__":
     application_root = _application_root()
+    if "--check-update" in sys.argv[1:]:
+        from audiolib import __version__
+        from audiolib.updates import GitHubUpdateManager
+
+        try:
+            GitHubUpdateManager(__version__).check_latest()
+        except Exception as error:
+            _write_recovery_log(application_root, f"UPDATE_CHECK_FAILED {error}")
+            raise SystemExit(1)
+        raise SystemExit(0)
     if "--install-recovery-startup" in sys.argv[1:]:
         _cleanup_old_startup_entries(application_root)
         register_recovery_startup(application_root)
