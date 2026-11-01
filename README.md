@@ -10,6 +10,7 @@ Current version: **2.6.2**.
 ## Features
 
 - categories with custom images and track counters;
+- complete English and Ukrainian interface localization;
 - a dedicated Favorites section;
 - category and audio-recording search;
 - import of common audio formats;

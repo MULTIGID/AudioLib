@@ -43,6 +43,7 @@ from .hotkeys import (
     hotkey_from_tk_event,
     parse_hotkey,
 )
+from .i18n import set_language, tr
 from .player import PlayerError, WindowsMediaPlayer, list_output_devices
 from .startup import register_autostart, unregister_autostart
 from .storage import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, LibraryStore, Person, Track
@@ -76,6 +77,54 @@ STOP_HOTKEY_ACTION_ID = -2
 DEFAULT_STOP_HOTKEY = "Ctrl+Alt+Backspace"
 DEFAULT_WINDOW_WIDTH = 1180
 DEFAULT_WINDOW_HEIGHT = 760
+
+
+class LocalizedStringVar(tk.StringVar):
+    """StringVar that translates application-owned interface messages."""
+
+    def __init__(self, *args, value=None, **kwargs) -> None:
+        super().__init__(*args, value=tr(value) if value is not None else value, **kwargs)
+
+    def set(self, value: object) -> None:
+        super().set(tr(value))
+
+
+class LocalizedLabel(tk.Label):
+    """Label that translates static application text at display time."""
+
+    def __init__(self, master=None, cnf=None, **kwargs) -> None:
+        options = dict(cnf or {})
+        options.update(kwargs)
+        if "text" in options:
+            options["text"] = tr(options["text"])
+        super().__init__(master, **options)
+
+    def configure(self, cnf=None, **kwargs):
+        options = dict(cnf or {})
+        options.update(kwargs)
+        if "text" in options:
+            options["text"] = tr(options["text"])
+        return super().configure(**options)
+
+    config = configure
+
+
+def _showerror(title: object, message: object, **kwargs):
+    return messagebox.showerror(tr(title), tr(message), **kwargs)
+
+
+def _showwarning(title: object, message: object, **kwargs):
+    return messagebox.showwarning(tr(title), tr(message), **kwargs)
+
+
+def _showinfo(title: object, message: object, **kwargs):
+    return messagebox.showinfo(tr(title), tr(message), **kwargs)
+
+
+def _askyesno(title: object, message: object, **kwargs):
+    return messagebox.askyesno(tr(title), tr(message), **kwargs)
+
+
 if pystray is not None:
     class AudioLibTrayIcon(pystray.Icon):
         """Windows tray icon with separate single- and double-click actions."""
@@ -388,7 +437,7 @@ class RoundedButton(tk.Canvas):
         font=("Segoe UI Semibold", 10),
         image: ImageTk.PhotoImage | None = None,
     ) -> None:
-        self.text = text
+        self.text = tr(text)
         self.button_image = image
         self.command = command
         self.normal_color = color
@@ -535,7 +584,7 @@ class RoundedButton(tk.Canvas):
         options.update(kwargs)
         redraw = False
         if "text" in options:
-            self.text = str(options.pop("text"))
+            self.text = tr(options.pop("text"))
             width, height = self._requested_size()
             super().configure(width=width, height=height)
             redraw = True
@@ -572,14 +621,14 @@ class SmoothRadioButton(tk.Canvas):
         variable: tk.StringVar,
         command=None,
     ) -> None:
-        self.text = text
+        self.text = tr(text)
         self.value = value
         self.variable = variable
         self.command = command
         self.hovered = False
         self.button_font = tkfont.Font(root=parent, font=("Segoe UI", 9))
         self._indicator_image: ImageTk.PhotoImage | None = None
-        width = 22 + self.button_font.measure(text)
+        width = 22 + self.button_font.measure(self.text)
         super().__init__(
             parent,
             width=width,
@@ -825,7 +874,7 @@ class RoundedDropdown(tk.Canvas):
             outline=outline,
         )
         self.create_image(0, 0, image=self._surface_image, anchor="nw")
-        label = self.textvariable.get() or self.placeholder
+        label = tr(self.textvariable.get() or self.placeholder)
         self.create_text(
             13,
             height / 2 - 2,
@@ -981,7 +1030,7 @@ class RoundedDropdown(tk.Canvas):
             row.create_text(
                 12,
                 row_height / 2,
-                text=self.values[index],
+                text=tr(self.values[index]),
                 fill=TEXT,
                 font=("Segoe UI", 10),
                 anchor="w",
@@ -1784,6 +1833,7 @@ class AudioLibraryApp:
         self.root_dir = root_dir
         self.app_settings_path = root_dir / "data" / "app_settings.json"
         self.app_settings = self._load_app_settings()
+        set_language(str(self.app_settings["language"]))
         self._apply_saved_accent()
         self.start_hidden = start_hidden
         self.store = LibraryStore(root_dir)
@@ -1807,7 +1857,7 @@ class AudioLibraryApp:
         self._session_wndproc = None
         self._previous_wndproc = None
         self.root = tk.Tk()
-        self.root.title("AudioLib — локальна бібліотека аудіозаписів")
+        self.root.title(tr("AudioLib — локальна бібліотека аудіозаписів"))
         window_width = DEFAULT_WINDOW_WIDTH
         window_height = DEFAULT_WINDOW_HEIGHT
         window_x = max(0, (self.root.winfo_screenwidth() - window_width) // 2)
@@ -1876,20 +1926,20 @@ class AudioLibraryApp:
         self.volume_value = int(self.app_settings["volume"])
         self.person_query = tk.StringVar()
         self.track_query = tk.StringVar()
-        self.now_playing = tk.StringVar(value="Оберіть запис")
+        self.now_playing = LocalizedStringVar(value="Оберіть запис")
         self.time_text = tk.StringVar(value="0:00 / 0:00")
-        self.status_text = tk.StringVar(value="Готово")
+        self.status_text = LocalizedStringVar(value="Готово")
         self.track_sort_column = "title"
         self.track_sort_descending = False
         self.source_column_visible = False
         self.track_heading_labels = {
             "number": "",
-            "title": "Назва",
+            "title": tr("Назва"),
             "speaker_play": "",
             "favorite": "",
-            "hotkey": "Гаряча клавіша",
-            "source": "Початковий файл",
-            "duration": "Тривалість",
+            "hotkey": tr("Гаряча клавіша"),
+            "source": tr("Початковий файл"),
+            "duration": tr("Тривалість"),
             "mic_play": "",
             "mic_stop": "",
         }
@@ -1992,7 +2042,7 @@ class AudioLibraryApp:
             defaults["close_action"] = "tray"
         if defaults["startup_view"] not in {"favorites", "last"}:
             defaults["startup_view"] = "favorites"
-        if defaults["language"] not in {"uk"}:
+        if defaults["language"] not in {"uk", "en"}:
             defaults["language"] = "uk"
         try:
             defaults["stop_hotkey"] = parse_hotkey(
@@ -2409,7 +2459,7 @@ class AudioLibraryApp:
 
         header = tk.Frame(panel, bg=BG)
         header.pack(fill="x", pady=(0, 8))
-        tk.Label(
+        LocalizedLabel(
             header,
             text="★ Favorites",
             bg=BG,
@@ -2493,7 +2543,7 @@ class AudioLibraryApp:
         for child in self.tray_window_items.winfo_children():
             child.destroy()
         if not self.tray_favorites:
-            tk.Label(
+            LocalizedLabel(
                 self.tray_window_items,
                 text="Немає вибраних записів",
                 bg=BG,
@@ -2510,7 +2560,7 @@ class AudioLibraryApp:
                     pady=5,
                 )
                 item.pack(fill="x", pady=2)
-                title = tk.Label(
+                title = LocalizedLabel(
                     item,
                     text=label,
                     bg=CARD,
@@ -2920,14 +2970,14 @@ class AudioLibraryApp:
             except OSError:
                 self.titlebar_icon = None
         if self.titlebar_icon is not None:
-            icon_label = tk.Label(
+            icon_label = LocalizedLabel(
                 self.title_bar, image=self.titlebar_icon, bg=title_color, bd=0
             )
             icon_label.pack(side="left", padx=(10, 7))
         else:
             icon_label = None
 
-        title_label = tk.Label(
+        title_label = LocalizedLabel(
             self.title_bar,
             text="AudioLib",
             bg=title_color,
@@ -3038,11 +3088,11 @@ class AudioLibraryApp:
         bar.pack(fill="x", side="top")
         bar.pack_propagate(False)
         if self.titlebar_icon is not None:
-            icon_label = tk.Label(bar, image=self.titlebar_icon, bg=title_color, bd=0)
+            icon_label = LocalizedLabel(bar, image=self.titlebar_icon, bg=title_color, bd=0)
             icon_label.pack(side="left", padx=(10, 7))
         else:
             icon_label = None
-        title_label = tk.Label(
+        title_label = LocalizedLabel(
             bar,
             text=title,
             bg=title_color,
@@ -3205,7 +3255,7 @@ class AudioLibraryApp:
                     self._play_pending_microphone_audio(payload)
                 elif error_text is not None:
                     self._pending_microphone_playback = None
-                    if pending_playback is not None and messagebox.askyesno(
+                    if pending_playback is not None and _askyesno(
                         "Віртуальний мікрофон",
                         f"{error_text}\n\nВідкрити налаштування?",
                         parent=self.root,
@@ -3222,10 +3272,10 @@ class AudioLibraryApp:
         try:
             microphones = list_physical_microphones()
         except AudioEndpointError as error:
-            messagebox.showerror("Вибір мікрофона", str(error), parent=self.root)
+            _showerror("Вибір мікрофона", str(error), parent=self.root)
             return None
         if not microphones:
-            messagebox.showerror(
+            _showerror(
                 "Вибір мікрофона",
                 "Windows не знайшла жодного доступного фізичного мікрофона.",
                 parent=self.root,
@@ -3236,7 +3286,7 @@ class AudioLibraryApp:
         if was_hidden:
             self.show_window()
         dialog = tk.Toplevel(self.root)
-        dialog.title("Вибір фізичного мікрофона")
+        dialog.title(tr("Вибір фізичного мікрофона"))
         dialog.geometry("560x390")
         dialog.minsize(480, 320)
         dialog.configure(bg=BG)
@@ -3244,14 +3294,14 @@ class AudioLibraryApp:
         dialog.grab_set()
         selected: list[CaptureEndpoint] = []
 
-        tk.Label(
+        LocalizedLabel(
             dialog,
             text="Фізичний мікрофон",
             bg=BG,
             fg=TEXT,
             font=("Segoe UI Semibold", 18),
         ).pack(anchor="w", padx=22, pady=(20, 6))
-        tk.Label(
+        LocalizedLabel(
             dialog,
             text=explanation,
             bg=BG,
@@ -3294,7 +3344,7 @@ class AudioLibraryApp:
             try:
                 self.microphone_routing.save_selected_microphone(endpoint.endpoint_id)
             except (AudioEndpointError, OSError) as error:
-                messagebox.showerror("Вибір мікрофона", str(error), parent=dialog)
+                _showerror("Вибір мікрофона", str(error), parent=dialog)
                 return
             selected.append(endpoint)
             dialog.destroy()
@@ -3330,13 +3380,13 @@ class AudioLibraryApp:
                     f"Фізичний мікрофон: {microphone_label(selected)}"
                 )
                 if parent is not None and show_confirmation and parent.winfo_exists():
-                    messagebox.showinfo(
+                    _showinfo(
                         "Вибір мікрофона",
                         f"Використовується: {microphone_label(selected)}",
                         parent=parent,
                     )
             elif error_text:
-                messagebox.showerror(
+                _showerror(
                     "Вибір мікрофона",
                     error_text,
                     parent=parent or self.root,
@@ -3547,7 +3597,7 @@ class AudioLibraryApp:
 
         content = tk.Frame(dialog, bg=BG, padx=24, pady=20)
         content.pack(fill="both", expand=True)
-        tk.Label(
+        LocalizedLabel(
             content,
             text=prompt,
             bg=BG,
@@ -3612,8 +3662,8 @@ class AudioLibraryApp:
         entry.bind("<FocusIn>", lambda _event: draw_field(focused=True))
         entry.bind("<FocusOut>", lambda _event: draw_field(focused=False))
 
-        error_text = tk.StringVar()
-        tk.Label(
+        error_text = LocalizedStringVar()
+        LocalizedLabel(
             content,
             textvariable=error_text,
             bg=BG,
@@ -3680,9 +3730,9 @@ class AudioLibraryApp:
         self._build_title_bar()
         header = tk.Frame(self.root, bg=BG, padx=18, pady=16)
         header.pack(fill="x")
-        tk.Label(header, text="AudioLib", bg=BG, fg=TEXT,
+        LocalizedLabel(header, text="AudioLib", bg=BG, fg=TEXT,
                  font=("Segoe UI Semibold", 24)).pack(side="left")
-        tk.Label(header, text="Локальна бібліотека аудіозаписів", bg=BG, fg=MUTED,
+        LocalizedLabel(header, text="Локальна бібліотека аудіозаписів", bg=BG, fg=MUTED,
                  font=("Segoe UI", 11)).pack(side="left", padx=14, pady=(8, 0))
         header_actions = tk.Frame(header, bg=BG)
         header_actions.pack(side="right")
@@ -3704,7 +3754,7 @@ class AudioLibraryApp:
 
         left_top = tk.Frame(left, bg=PANEL, padx=16, pady=14)
         left_top.pack(fill="x")
-        tk.Label(left_top, text="Категорії", bg=PANEL, fg=TEXT,
+        LocalizedLabel(left_top, text="Категорії", bg=PANEL, fg=TEXT,
                  font=("Segoe UI Semibold", 16)).pack(side="left")
         self._button(left_top, "+ Додати", self.add_person).pack(side="right")
         people_search_color = "#374151"
@@ -3765,7 +3815,7 @@ class AudioLibraryApp:
             (16, 16), Image.Resampling.LANCZOS
         )
         self.person_search_icon = ImageTk.PhotoImage(people_search_icon)
-        self.person_search_placeholder = tk.Label(
+        self.person_search_placeholder = LocalizedLabel(
             people_search_container,
             text=" Пошук",
             image=self.person_search_icon,
@@ -3806,7 +3856,7 @@ class AudioLibraryApp:
 
         person_header = tk.Frame(right, bg=BG, pady=8)
         person_header.pack(fill="x", padx=(18, 0))
-        self.person_title = tk.Label(person_header, text="Оберіть людину", bg=BG, fg=TEXT,
+        self.person_title = LocalizedLabel(person_header, text="Оберіть людину", bg=BG, fg=TEXT,
                                      font=("Segoe UI Semibold", 22))
         self.person_title.pack(side="left")
         self.delete_person_button = self._button(person_header, "Видалити", self.delete_person, DANGER)
@@ -3868,7 +3918,7 @@ class AudioLibraryApp:
         search_draw.line((36, 36, 56, 56), fill=search_color, width=6)
         search_icon = search_icon.resize((16, 16), Image.Resampling.LANCZOS)
         self.track_search_icon = ImageTk.PhotoImage(search_icon)
-        self.track_search_placeholder = tk.Label(
+        self.track_search_placeholder = LocalizedLabel(
             search_container,
             text=" Пошук",
             image=self.track_search_icon,
@@ -3964,7 +4014,7 @@ class AudioLibraryApp:
 
         player = tk.Frame(self.root, bg="#0b1220", padx=18, pady=12)
         player.pack(fill="x")
-        tk.Label(player, textvariable=self.now_playing, bg="#0b1220", fg=TEXT,
+        LocalizedLabel(player, textvariable=self.now_playing, bg="#0b1220", fg=TEXT,
                  font=("Segoe UI Semibold", 10), width=26, anchor="w").pack(side="left")
         self.play_pause_button = self._button(
             player, "▶", self.toggle_pause
@@ -3989,10 +4039,10 @@ class AudioLibraryApp:
             "<ButtonPress-1>", lambda _: setattr(self, "seeking", True), add="+"
         )
         self.progress.bind("<ButtonRelease-1>", self._commit_seek, add="+")
-        tk.Label(player, textvariable=self.time_text, bg="#0b1220", fg=MUTED,
+        LocalizedLabel(player, textvariable=self.time_text, bg="#0b1220", fg=MUTED,
                  font=("Segoe UI", 9), width=12).pack(side="left", padx=10)
         self.volume_icon = self._make_volume_icon()
-        tk.Label(player, image=self.volume_icon, bg="#0b1220", bd=0).pack(side="left")
+        LocalizedLabel(player, image=self.volume_icon, bg="#0b1220", bd=0).pack(side="left")
         self.volume_scale = FlatScale(
             player,
             from_=0,
@@ -4173,14 +4223,14 @@ class AudioLibraryApp:
         favorites_card.pack(fill="x", padx=6, pady=(card_gap, card_gap * 2))
         favorite_photo = self._favorites_photo(photo_size)
         self.photo_refs.append(favorite_photo)
-        favorite_photo_label = tk.Label(
+        favorite_photo_label = LocalizedLabel(
             favorites_card,
             image=favorite_photo,
             bg=favorites_card["bg"],
             cursor="hand2",
         )
         favorite_photo_label.pack(side="left")
-        favorite_name_label = tk.Label(
+        favorite_name_label = LocalizedLabel(
             favorites_card,
             text="★ Favorites",
             bg=favorites_card["bg"],
@@ -4191,7 +4241,7 @@ class AudioLibraryApp:
             cursor="hand2",
         )
         favorite_name_label.pack(side="left", padx=12)
-        favorite_count_label = tk.Label(
+        favorite_count_label = LocalizedLabel(
             favorites_card,
             text=f"{self.store.favorite_count()}/{FAVORITES_LIMIT}",
             bg=favorites_card["bg"],
@@ -4219,7 +4269,7 @@ class AudioLibraryApp:
         people = self.store.list_people(self.person_query.get())
         track_counts = self.store.track_counts_by_person()
         if not people:
-            tk.Label(self.people_frame, text="Додайте першу людину", bg=PANEL, fg=MUTED,
+            LocalizedLabel(self.people_frame, text="Додайте першу людину", bg=PANEL, fg=MUTED,
                      pady=30, font=("Segoe UI", 11)).pack(fill="x")
         for person in people:
             selected = person.id == self.selected_person_id
@@ -4228,9 +4278,9 @@ class AudioLibraryApp:
             card.pack(fill="x", padx=6, pady=card_gap)
             photo = self._person_photo(person, photo_size)
             self.photo_refs.append(photo)
-            photo_label = tk.Label(card, image=photo, bg=card["bg"], cursor="hand2")
+            photo_label = LocalizedLabel(card, image=photo, bg=card["bg"], cursor="hand2")
             photo_label.pack(side="left")
-            count_label = tk.Label(
+            count_label = LocalizedLabel(
                 card,
                 text=str(track_counts.get(person.id, 0)),
                 bg=card["bg"],
@@ -4239,7 +4289,7 @@ class AudioLibraryApp:
                 cursor="hand2",
             )
             count_label.pack(side="right", padx=(8, 4))
-            name_label = tk.Label(card, text=person.name, bg=card["bg"], fg=TEXT,
+            name_label = LocalizedLabel(card, text=person.name, bg=card["bg"], fg=TEXT,
                                   font=("Segoe UI Semibold", 11), wraplength=180, justify="left",
                                   cursor="hand2")
             name_label.pack(side="left", padx=12)
@@ -4308,7 +4358,7 @@ class AudioLibraryApp:
                 filetypes=[("Зображення", " ".join(f"*{ext}" for ext in sorted(IMAGE_EXTENSIONS)))],
             )
         except FileDialogError as error:
-            messagebox.showerror("Помилка вибору файлу", str(error), parent=self.root)
+            _showerror("Помилка вибору файлу", str(error), parent=self.root)
             return
         photo = selected[0] if selected else ""
         try:
@@ -4316,7 +4366,7 @@ class AudioLibraryApp:
             self.status_text.set(f"Додано людину: {person.name}")
             self.select_person(person.id)
         except (OSError, ValueError) as error:
-            messagebox.showerror("Не вдалося додати", str(error), parent=self.root)
+            _showerror("Не вдалося додати", str(error), parent=self.root)
 
     def edit_person(self) -> None:
         if self.selected_person_id is None or self.selected_person_id == FAVORITES_PERSON_ID:
@@ -4333,9 +4383,9 @@ class AudioLibraryApp:
             try:
                 self.store.rename_person(person.id, name)
             except ValueError as error:
-                messagebox.showerror("Помилка", str(error), parent=self.root)
+                _showerror("Помилка", str(error), parent=self.root)
                 return
-        if messagebox.askyesno("Фотографія", "Вибрати нову фотографію?", parent=self.root):
+        if _askyesno("Фотографія", "Вибрати нову фотографію?", parent=self.root):
             try:
                 selected = choose_files(
                     self.root,
@@ -4343,14 +4393,14 @@ class AudioLibraryApp:
                     filetypes=[("Зображення", " ".join(f"*{ext}" for ext in sorted(IMAGE_EXTENSIONS)))],
                 )
             except FileDialogError as error:
-                messagebox.showerror("Помилка вибору файлу", str(error), parent=self.root)
+                _showerror("Помилка вибору файлу", str(error), parent=self.root)
                 return
             photo = selected[0] if selected else ""
             if photo:
                 try:
                     self.store.set_person_photo(person.id, Path(photo))
                 except (OSError, ValueError) as error:
-                    messagebox.showerror("Помилка фотографії", str(error), parent=self.root)
+                    _showerror("Помилка фотографії", str(error), parent=self.root)
         updated = self.store.get_person(person.id)
         self.person_title.configure(text=updated.name if updated else "")
         self.refresh_people()
@@ -4364,7 +4414,7 @@ class AudioLibraryApp:
         if self._library_task_in_progress:
             self.status_text.set("Дочекайтеся завершення поточної операції з бібліотекою")
             return
-        if not messagebox.askyesno(
+        if not _askyesno(
             "Видалити людину",
             f"Видалити «{person.name}» та всі пов'язані аудіозаписи?\nЦю дію неможливо скасувати.",
             icon="warning", parent=self.root,
@@ -4399,7 +4449,7 @@ class AudioLibraryApp:
 
     def add_tracks(self) -> None:
         if self.selected_person_id is None or self.selected_person_id == FAVORITES_PERSON_ID:
-            messagebox.showinfo("Спочатку оберіть людину", "Аудіозаписи додаються до вибраної людини.")
+            _showinfo("Спочатку оберіть людину", "Аудіозаписи додаються до вибраної людини.")
             return
         try:
             paths = choose_files(
@@ -4409,7 +4459,7 @@ class AudioLibraryApp:
                 multiple=True,
             )
         except FileDialogError as error:
-            messagebox.showerror("Помилка вибору файлу", str(error), parent=self.root)
+            _showerror("Помилка вибору файлу", str(error), parent=self.root)
             return
         if not paths:
             return
@@ -4456,7 +4506,7 @@ class AudioLibraryApp:
                         f"METADATA_REFRESH_ERROR {error_text}"
                     )
                 elif error_text:
-                    messagebox.showerror(
+                    _showerror(
                         "Операція з бібліотекою не виконана",
                         str(error_text),
                         parent=self.root,
@@ -4663,7 +4713,7 @@ class AudioLibraryApp:
         try:
             self.store.set_favorite(track_id, adding, FAVORITES_LIMIT)
         except ValueError as error:
-            messagebox.showwarning("Favorites", str(error), parent=self.root)
+            _showwarning("Favorites", str(error), parent=self.root)
             return
         self._refresh_tray_favorites()
         self._reload_global_hotkeys()
@@ -4755,7 +4805,7 @@ class AudioLibraryApp:
         notice.create_text(
             width / 2,
             height / 2 - 2,
-            text=message,
+            text=tr(message),
             fill="#fecaca" if error else "#fde68a",
             font=("Segoe UI Semibold", 10),
             anchor="center",
@@ -4860,7 +4910,7 @@ class AudioLibraryApp:
 
         content = tk.Frame(dialog, bg=BG, padx=24, pady=20)
         content.pack(fill="both", expand=True)
-        tk.Label(
+        LocalizedLabel(
             content,
             text=track.title,
             bg=BG,
@@ -4868,7 +4918,7 @@ class AudioLibraryApp:
             font=("Segoe UI Semibold", 15),
             anchor="w",
         ).pack(fill="x")
-        tk.Label(
+        LocalizedLabel(
             content,
             text=(
                 "Натисніть бажану комбінацію. Вона працюватиме глобально, "
@@ -4883,7 +4933,7 @@ class AudioLibraryApp:
             anchor="w",
         ).pack(fill="x", pady=(8, 14))
         captured_text = tk.StringVar(value=display_hotkey(current_hotkey))
-        hotkey_label = tk.Label(
+        hotkey_label = LocalizedLabel(
             content,
             textvariable=captured_text,
             bg=PANEL,
@@ -4892,8 +4942,8 @@ class AudioLibraryApp:
             height=2,
         )
         hotkey_label.pack(fill="x")
-        error_text = tk.StringVar()
-        tk.Label(
+        error_text = LocalizedStringVar()
+        LocalizedLabel(
             content,
             textvariable=error_text,
             bg=BG,
@@ -4901,7 +4951,7 @@ class AudioLibraryApp:
             font=("Segoe UI", 9),
             anchor="w",
         ).pack(fill="x", pady=(5, 0))
-        tk.Label(
+        LocalizedLabel(
             content,
             text="Backspace — очистити · Esc — скасувати",
             bg=BG,
@@ -5045,7 +5095,7 @@ class AudioLibraryApp:
 
         content = tk.Frame(dialog, bg=BG, padx=24, pady=20)
         content.pack(fill="both", expand=True)
-        tk.Label(
+        LocalizedLabel(
             content,
             text="Зупинити все відтворення",
             bg=BG,
@@ -5053,7 +5103,7 @@ class AudioLibraryApp:
             font=("Segoe UI Semibold", 15),
             anchor="w",
         ).pack(fill="x")
-        tk.Label(
+        LocalizedLabel(
             content,
             text=(
                 "Натисніть нову комбінацію. Вона зупинятиме звук у динаміках "
@@ -5068,7 +5118,7 @@ class AudioLibraryApp:
             anchor="w",
         ).pack(fill="x", pady=(8, 14))
         captured_text = tk.StringVar(value=display_hotkey(current_hotkey))
-        tk.Label(
+        LocalizedLabel(
             content,
             textvariable=captured_text,
             bg=PANEL,
@@ -5076,8 +5126,8 @@ class AudioLibraryApp:
             font=("Segoe UI Semibold", 13),
             height=2,
         ).pack(fill="x")
-        error_text = tk.StringVar()
-        tk.Label(
+        error_text = LocalizedStringVar()
+        LocalizedLabel(
             content,
             textvariable=error_text,
             bg=BG,
@@ -5205,7 +5255,7 @@ class AudioLibraryApp:
 
     def play_random_track(self) -> None:
         if self.selected_person_id is None:
-            messagebox.showinfo(
+            _showinfo(
                 "Спочатку оберіть людину",
                 "Випадковий запис обирається для поточної людини.",
                 parent=self.root,
@@ -5217,7 +5267,7 @@ class AudioLibraryApp:
             else self.store.list_tracks(self.selected_person_id)
         )
         if not tracks:
-            messagebox.showinfo(
+            _showinfo(
                 "Немає записів",
                 (
                     "У Favorites ще немає аудіозаписів."
@@ -5347,7 +5397,7 @@ class AudioLibraryApp:
                     self.status_text.set("Запис більше не існує")
                     continue
                 if error_text:
-                    messagebox.showerror(
+                    _showerror(
                         "Помилка відтворення",
                         f"Не вдалося підготувати аудіофайл: {error_text}",
                         parent=self.root,
@@ -5381,7 +5431,7 @@ class AudioLibraryApp:
                         self.status_text.set(f"Відтворюється: {track.title}")
                         self.refresh_tracks()
                     except PlayerError as error:
-                        messagebox.showerror(
+                        _showerror(
                             "Помилка відтворення", str(error), parent=self.root
                         )
                 else:
@@ -5425,7 +5475,7 @@ class AudioLibraryApp:
             self.status_text.set(f"У мікрофон: {track.title}")
             self.refresh_tracks()
         except VirtualAudioError as error:
-            if messagebox.askyesno(
+            if _askyesno(
                 "Віртуальний мікрофон",
                 f"{error}\n\nВідкрити налаштування?",
                 parent=self.root,
@@ -5440,7 +5490,7 @@ class AudioLibraryApp:
             return
         path = self.store.absolute(track.file_path)
         if not path or not path.exists():
-            messagebox.showerror("Файл не знайдено", "Аудіофайл відсутній у бібліотеці.", parent=self.root)
+            _showerror("Файл не знайдено", "Аудіофайл відсутній у бібліотеці.", parent=self.root)
             return
         try:
             self.player.stop()
@@ -5470,7 +5520,7 @@ class AudioLibraryApp:
                 self.refresh_tracks()
                 return
             except PlayerError as error:
-                messagebox.showerror("Помилка відтворення", str(error), parent=self.root)
+                _showerror("Помилка відтворення", str(error), parent=self.root)
                 return
         if self.track_table.exists(str(track_id)):
             self.track_table.selection_set(str(track_id))
@@ -5503,7 +5553,7 @@ class AudioLibraryApp:
             return
         path = self.store.absolute(track.file_path)
         if not path or not path.exists():
-            messagebox.showerror("Файл не знайдено", "Аудіофайл відсутній у бібліотеці.", parent=self.root)
+            _showerror("Файл не знайдено", "Аудіофайл відсутній у бібліотеці.", parent=self.root)
             return
         self.virtual_microphone.stop_sound()
         self.virtual_track_id = None
@@ -5559,7 +5609,7 @@ class AudioLibraryApp:
                 pass
         window = tk.Toplevel(self.root)
         self.settings_window = window
-        window.title("Налаштування")
+        window.title(tr("Налаштування"))
         window_width = 620
         window_height = 650
         self.root.update_idletasks()
@@ -5584,7 +5634,7 @@ class AudioLibraryApp:
             else None,
             add="+",
         )
-        status = tk.StringVar()
+        status = LocalizedStringVar()
 
         shell = tk.Frame(window, bg=BG)
         shell.pack(fill="both", expand=True)
@@ -5631,7 +5681,7 @@ class AudioLibraryApp:
             tk.Frame(section_header, bg="#334155", height=1).pack(
                 side="left", fill="x", expand=True, padx=(0, 10)
             )
-            tk.Label(
+            LocalizedLabel(
                 section_header,
                 text=text,
                 bg=BG,
@@ -5657,7 +5707,12 @@ class AudioLibraryApp:
         startup_view_value = tk.StringVar(
             value=str(self.app_settings["startup_view"])
         )
-        language_value = tk.StringVar(value="Українська")
+        language_keys = ["uk", "en"]
+        language_labels = ["Українська", "English"]
+        current_language = str(self.app_settings.get("language", "uk"))
+        language_value = tk.StringVar(
+            value=language_labels[language_keys.index(current_language)]
+        )
         output_device_value = tk.StringVar()
         local_monitoring_value = tk.BooleanVar(
             value=bool(self.app_settings["local_monitoring"])
@@ -5683,7 +5738,7 @@ class AudioLibraryApp:
                     unregister_autostart()
             except OSError as error:
                 autostart_value.set(not enabled)
-                messagebox.showerror("Автозапуск", str(error), parent=window)
+                _showerror("Автозапуск", str(error), parent=window)
                 return
             save_setting("autostart_enabled", enabled)
             minimized_switch.set_enabled(enabled)
@@ -5695,7 +5750,7 @@ class AudioLibraryApp:
                     register_autostart(self.root_dir, value)
                 except OSError as error:
                     minimized_value.set(not value)
-                    messagebox.showerror("Автозапуск", str(error), parent=window)
+                    _showerror("Автозапуск", str(error), parent=window)
                     return
             save_setting("start_minimized", value)
 
@@ -5710,7 +5765,7 @@ class AudioLibraryApp:
             row.pack(fill="x", pady=5)
             labels = tk.Frame(row, bg=PANEL)
             labels.pack(side="left", fill="x", expand=True)
-            tk.Label(
+            LocalizedLabel(
                 labels,
                 text=title,
                 bg=PANEL,
@@ -5718,7 +5773,7 @@ class AudioLibraryApp:
                 anchor="w",
                 font=("Segoe UI Semibold", 10),
             ).pack(fill="x")
-            tk.Label(
+            LocalizedLabel(
                 labels,
                 text=description,
                 bg=PANEL,
@@ -5768,7 +5823,7 @@ class AudioLibraryApp:
         ) -> None:
             row = tk.Frame(general_panel, bg=PANEL)
             row.pack(fill="x", pady=(7, 3))
-            tk.Label(
+            LocalizedLabel(
                 row,
                 text=title,
                 bg=PANEL,
@@ -5804,7 +5859,7 @@ class AudioLibraryApp:
 
         language_row = tk.Frame(general_panel, bg=PANEL)
         language_row.pack(fill="x", pady=(8, 3))
-        tk.Label(
+        LocalizedLabel(
             language_row,
             text="Мова",
             bg=PANEL,
@@ -5812,21 +5867,35 @@ class AudioLibraryApp:
             anchor="w",
             font=("Segoe UI Semibold", 10),
         ).pack(fill="x", pady=(0, 5))
+        def apply_language(index: int) -> None:
+            if not 0 <= index < len(language_keys):
+                return
+            save_setting("language", language_keys[index])
+            status.set("Мову змінено. Перезапустіть AudioLib, щоб застосувати зміни.")
+
         language_dropdown = RoundedDropdown(
             language_row,
             textvariable=language_value,
-            command=lambda _index: save_setting("language", "uk"),
+            command=apply_language,
             width=520,
         )
-        language_dropdown.configure(values=["Українська"])
-        language_dropdown.current(0)
+        language_dropdown.configure(values=language_labels)
+        language_dropdown.current(language_keys.index(current_language))
         language_dropdown.pack(fill="x")
+        LocalizedLabel(
+            language_row,
+            text="Зміни мови застосовуються після перезапуску AudioLib.",
+            bg=PANEL,
+            fg=MUTED,
+            anchor="w",
+            font=("Segoe UI", 9),
+        ).pack(fill="x", pady=(5, 0))
 
         window_size_row = tk.Frame(general_panel, bg=PANEL)
         window_size_row.pack(fill="x", pady=(10, 5))
         window_size_labels = tk.Frame(window_size_row, bg=PANEL)
         window_size_labels.pack(side="left", fill="x", expand=True)
-        tk.Label(
+        LocalizedLabel(
             window_size_labels,
             text="Розмір вікна",
             bg=PANEL,
@@ -5834,7 +5903,7 @@ class AudioLibraryApp:
             anchor="w",
             font=("Segoe UI Semibold", 10),
         ).pack(fill="x")
-        tk.Label(
+        LocalizedLabel(
             window_size_labels,
             text="Повертає стандартний розмір і розташування.",
             bg=PANEL,
@@ -5870,7 +5939,7 @@ class AudioLibraryApp:
 
         output_row = tk.Frame(playback_panel, bg=PANEL)
         output_row.pack(fill="x", pady=(0, 9))
-        tk.Label(
+        LocalizedLabel(
             output_row,
             text="Пристрій виведення:",
             bg=PANEL,
@@ -5893,7 +5962,7 @@ class AudioLibraryApp:
             try:
                 self.player.set_output_device(device_name)
             except PlayerError as error:
-                messagebox.showerror("Пристрій виведення", str(error), parent=window)
+                _showerror("Пристрій виведення", str(error), parent=window)
                 return
             save_setting("output_device", device_name)
             bridge_was_running = self.virtual_microphone.is_running()
@@ -5964,7 +6033,7 @@ class AudioLibraryApp:
         stop_hotkey_row.pack(fill="x", pady=(9, 2))
         stop_hotkey_labels = tk.Frame(stop_hotkey_row, bg=PANEL)
         stop_hotkey_labels.pack(side="left", fill="x", expand=True)
-        tk.Label(
+        LocalizedLabel(
             stop_hotkey_labels,
             text="Гаряча клавіша Stop",
             bg=PANEL,
@@ -5972,7 +6041,7 @@ class AudioLibraryApp:
             anchor="w",
             font=("Segoe UI Semibold", 10),
         ).pack(fill="x")
-        tk.Label(
+        LocalizedLabel(
             stop_hotkey_labels,
             text="Зупиняє будь-який активний запис у динаміках і мікрофоні.",
             bg=PANEL,
@@ -6000,7 +6069,7 @@ class AudioLibraryApp:
 
         header = tk.Frame(content, bg=BG)
         header.pack(fill="x", padx=22, pady=(0, 4))
-        tk.Label(
+        LocalizedLabel(
             header, text="VB-CABLE", bg=BG, fg=TEXT,
             font=("Segoe UI Semibold", 20),
         ).pack(side="left")
@@ -6010,7 +6079,7 @@ class AudioLibraryApp:
             lambda: webbrowser.open(DRIVER_PAGE),
             "#475569",
         ).pack(side="right")
-        tk.Label(
+        LocalizedLabel(
             content,
             text=(
                 "AudioLib використовує офіційний підписаний драйвер VB-Audio. "
@@ -6020,7 +6089,7 @@ class AudioLibraryApp:
             bg=BG, fg=MUTED, justify="left", wraplength=570,
             font=("Segoe UI", 10),
         ).pack(anchor="w", padx=22, pady=(0, 12))
-        status_label = tk.Label(
+        status_label = LocalizedLabel(
             content, textvariable=status, bg=PANEL, fg=TEXT, anchor="w",
             padx=12, pady=10, font=("Segoe UI Semibold", 10),
         )
@@ -6030,7 +6099,7 @@ class AudioLibraryApp:
         microphone_value = tk.StringVar()
         microphone_row = tk.Frame(content, bg=BG)
         microphone_row.pack(fill="x", padx=22, pady=(2, 6))
-        tk.Label(
+        LocalizedLabel(
             microphone_row,
             text="Фізичний мікрофон:",
             bg=BG,
@@ -6068,7 +6137,7 @@ class AudioLibraryApp:
         def apply_microphone() -> None:
             index = microphone_box.current()
             if index < 0 or index >= len(microphone_choices):
-                messagebox.showwarning(
+                _showwarning(
                     "Вибір мікрофона",
                     "Оберіть фізичний мікрофон зі списку.",
                     parent=window,
@@ -6085,7 +6154,7 @@ class AudioLibraryApp:
 
         latency_row = tk.Frame(content, bg=BG)
         latency_row.pack(fill="x", padx=22, pady=(4, 6))
-        tk.Label(
+        LocalizedLabel(
             latency_row,
             text="Затримка / стабільність:",
             bg=BG,
@@ -6128,7 +6197,7 @@ class AudioLibraryApp:
         latency_box.configure(values=latency_options)
         latency_box.current(latency_options.index(latency_value.get()))
         latency_box.pack(side="left", fill="x", expand=True)
-        tk.Label(
+        LocalizedLabel(
             content,
             text=(
                 "Увага: після встановлення Windows може автоматично вибрати CABLE Input "
@@ -6154,7 +6223,7 @@ class AudioLibraryApp:
                     setup = prepare_official_installer()
                     self.root.after(0, lambda: finish(setup, removing))
                 except Exception as error:
-                    self.root.after(0, lambda: messagebox.showerror(
+                    self.root.after(0, lambda: _showerror(
                         "Помилка VB-CABLE", str(error), parent=window
                     ))
                     self.root.after(0, refresh_status)
@@ -6163,7 +6232,7 @@ class AudioLibraryApp:
 
         def finish(setup: Path, removing: bool) -> None:
             action = "Remove Driver" if removing else "Install Driver"
-            messagebox.showinfo(
+            _showinfo(
                 "VB-CABLE",
                 f"У вікні VB-CABLE натисніть «{action}».\n"
                 "Після завершення перезавантажте Windows.\n\n"
@@ -6175,7 +6244,7 @@ class AudioLibraryApp:
                 launch_driver_setup(setup)
                 status.set("Інсталятор запущено. Потім перезавантажте Windows.")
             except VirtualAudioError as error:
-                messagebox.showerror("Помилка VB-CABLE", str(error), parent=window)
+                _showerror("Помилка VB-CABLE", str(error), parent=window)
                 refresh_status()
 
         buttons = tk.Frame(content, bg=BG)
@@ -6191,7 +6260,7 @@ class AudioLibraryApp:
         self._button(
             buttons, "Перевірити", refresh_status, "#475569"
         ).grid(row=0, column=2, sticky="ew", padx=(4, 0))
-        tk.Label(
+        LocalizedLabel(
             content,
             text=(
                 "Після встановлення оберіть CABLE Output як мікрофон у Discord/грі. "
@@ -6203,7 +6272,7 @@ class AudioLibraryApp:
         add_section_heading("Бібліотека")
         library_panel = tk.Frame(content, bg=PANEL, padx=14, pady=12)
         library_panel.pack(fill="x", padx=22)
-        tk.Label(
+        LocalizedLabel(
             library_panel,
             text="Резервна копія містить базу, аудіозаписи, зображення та налаштування.",
             bg=PANEL,
@@ -6216,9 +6285,9 @@ class AudioLibraryApp:
         library_actions.pack(fill="x")
         for column in range(2):
             library_actions.columnconfigure(column, weight=1, uniform="library-actions")
-        library_status_value = tk.StringVar()
+        library_status_value = LocalizedStringVar()
         library_progress_row = tk.Frame(library_panel, bg=PANEL)
-        tk.Label(
+        LocalizedLabel(
             library_progress_row,
             textvariable=library_status_value,
             bg=PANEL,
@@ -6269,7 +6338,7 @@ class AudioLibraryApp:
                     return
                 self.store.connection.commit()
             except (FileDialogError, OSError) as error:
-                messagebox.showerror("Резервна копія", str(error), parent=window)
+                _showerror("Резервна копія", str(error), parent=window)
                 return
             destination = Path(selected)
             set_library_busy(True, "Створення резервної копії…")
@@ -6286,11 +6355,11 @@ class AudioLibraryApp:
                 set_library_busy(False)
                 if error is not None:
                     self.status_text.set("Не вдалося створити резервну копію")
-                    messagebox.showerror("Резервна копія", str(error), parent=window)
+                    _showerror("Резервна копія", str(error), parent=window)
                     return
                 assert result is not None
                 self.status_text.set(f"Створено резервну копію: {result.name}")
-                messagebox.showinfo(
+                _showinfo(
                     "Резервна копія створена",
                     f"Файл збережено тут:\n{result}",
                     parent=window,
@@ -6306,11 +6375,11 @@ class AudioLibraryApp:
                     filetypes=[("Резервна копія AudioLib", "*.zip")],
                 )
             except FileDialogError as error:
-                messagebox.showerror("Імпорт", str(error), parent=window)
+                _showerror("Імпорт", str(error), parent=window)
                 return
             if not selected:
                 return
-            if not messagebox.askyesno(
+            if not _askyesno(
                 "Відновити бібліотеку",
                 "Поточну бібліотеку буде замінено даними з резервної копії. Продовжити?",
                 icon="warning",
@@ -6338,7 +6407,7 @@ class AudioLibraryApp:
                 if error is not None:
                     self._reload_global_hotkeys()
                     self.status_text.set("Не вдалося імпортувати резервну копію")
-                    messagebox.showerror("Імпорт", str(error), parent=window)
+                    _showerror("Імпорт", str(error), parent=window)
                     return
                 self.app_settings = self._load_app_settings()
                 self._reload_global_hotkeys()
@@ -6363,7 +6432,7 @@ class AudioLibraryApp:
                 self._refresh_tray_favorites()
                 self.status_text.set("Бібліотеку відновлено з резервної копії")
                 window.destroy()
-                messagebox.showinfo(
+                _showinfo(
                     "Імпорт завершено",
                     "Бібліотеку відновлено. Перезапустіть AudioLib, щоб застосувати налаштування з копії.",
                     parent=self.root,
@@ -6395,7 +6464,7 @@ class AudioLibraryApp:
         ) -> RoundedDropdown:
             frame = tk.Frame(appearance_panel, bg=PANEL)
             frame.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 5, 0))
-            tk.Label(
+            LocalizedLabel(
                 frame,
                 text=title,
                 bg=PANEL,
@@ -6462,7 +6531,7 @@ class AudioLibraryApp:
         tk.Frame(about_header, bg="#334155", height=1).pack(
             side="left", fill="x", expand=True, padx=(0, 10)
         )
-        tk.Label(
+        LocalizedLabel(
             about_header,
             text="Про програму",
             bg=BG,
@@ -6483,7 +6552,7 @@ class AudioLibraryApp:
             ("Опис", "Локальна бібліотека аудіозаписів"),
         )
         for row, (label, value) in enumerate(about_rows):
-            tk.Label(
+            LocalizedLabel(
                 about_panel,
                 text=f"{label}:",
                 bg=PANEL,
@@ -6491,7 +6560,7 @@ class AudioLibraryApp:
                 anchor="w",
                 font=("Segoe UI", 10),
             ).grid(row=row, column=0, sticky="w", padx=(0, 18), pady=2)
-            tk.Label(
+            LocalizedLabel(
                 about_panel,
                 text=value,
                 bg=PANEL,
@@ -6525,7 +6594,7 @@ class AudioLibraryApp:
                 self.play_pause_button.configure(text="▶")
             self.refresh_tracks()
         except PlayerError as error:
-            messagebox.showerror("Помилка", str(error), parent=self.root)
+            _showerror("Помилка", str(error), parent=self.root)
 
     def _set_volume(self, value: str) -> None:
         self.volume_value = int(float(value))
@@ -6594,13 +6663,13 @@ class AudioLibraryApp:
                     self.now_playing.set(title.strip())
                 self.refresh_tracks()
             except ValueError as error:
-                messagebox.showerror("Помилка", str(error), parent=self.root)
+                _showerror("Помилка", str(error), parent=self.root)
 
     def delete_track(self) -> None:
         track = self._selected_track()
         if not track:
             return
-        if not messagebox.askyesno("Видалити запис", f"Видалити «{track.title}»?", parent=self.root):
+        if not _askyesno("Видалити запис", f"Видалити «{track.title}»?", parent=self.root):
             return
         if self.current_track_id == track.id:
             self._clear_player()

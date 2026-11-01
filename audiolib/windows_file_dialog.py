@@ -7,6 +7,8 @@ import uuid
 from ctypes import wintypes
 from typing import Iterable
 
+from .i18n import tr
+
 
 class FileDialogError(RuntimeError):
     pass
@@ -198,6 +200,8 @@ def choose_files(
     filetypes: Iterable[tuple[str, str]],
     multiple: bool = False,
 ) -> tuple[str, ...]:
+    title = tr(title)
+    filetypes = tuple((tr(name), pattern) for name, pattern in filetypes)
     if os.name == "nt":
         owner = None
         if parent is not None:
@@ -359,6 +363,8 @@ def choose_save_file(
     default_name: str,
     default_extension: str,
 ) -> str:
+    title = tr(title)
+    filetypes = tuple((tr(name), pattern) for name, pattern in filetypes)
     if os.name == "nt":
         owner = None
         if parent is not None:
