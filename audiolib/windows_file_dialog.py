@@ -43,7 +43,6 @@ if os.name == "nt":
     COINIT_APARTMENTTHREADED = 0x2
     FOS_OVERWRITEPROMPT = 0x2
     FOS_NOCHANGEDIR = 0x8
-    FOS_PICKFOLDERS = 0x20
     FOS_FORCEFILESYSTEM = 0x40
     FOS_ALLOWMULTISELECT = 0x200
     FOS_PATHMUSTEXIST = 0x800
@@ -269,6 +268,14 @@ def choose_files(
         )
     selected = filedialog.askopenfilename(parent=parent, title=title, filetypes=list(filetypes))
     return (selected,) if selected else ()
+
+
+def choose_folder(parent, *, title: str) -> str:
+    from tkinter import filedialog
+
+    return str(
+        filedialog.askdirectory(parent=parent, title=tr(title), mustexist=True)
+    )
 
 
 def _modern_windows_save_dialog(

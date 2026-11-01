@@ -4,6 +4,8 @@ import array
 import threading
 from pathlib import Path
 
+from .audio_endpoints import default_playback_device_names
+
 try:
     import miniaudio
     _MINIAUDIO_IMPORT_ERROR = None
@@ -20,19 +22,99 @@ class PlayerError(RuntimeError):
     pass
 
 
+def _is_cable_name(name: str) -> bool:
+    lowered = name.casefold()
+    return "cable" in lowered and (
+        "vb-audio" in lowered or "input" in lowered or "output" in lowered
+    )
+
+
+def _name_matches(candidate: str, wanted: str) -> bool:
+    candidate_key = " ".join(candidate.casefold().split())
+    wanted_key = " ".join(wanted.casefold().split())
+    return bool(
+        candidate_key
+        and wanted_key
+        and (
+            candidate_key == wanted_key
+            or (len(wanted_key) >= 5 and wanted_key in candidate_key)
+            or (len(candidate_key) >= 5 and candidate_key in wanted_key)
+        )
+    )
+
+
+def choose_output_device(playbacks, requested_name: str = ""):
+    """Choose an explicit physical endpoint, preferring Windows defaults."""
+    physical = [
+        item
+        for item in playbacks
+        if not _is_cable_name(str(item.get("name", "")))
+    ]
+    if not physical:
+        return None
+    requested_name = requested_name.strip()
+    if requested_name:
+        selected = next(
+            (
+                item
+                for item in physical
+                if _name_matches(str(item.get("name", "")), requested_name)
+            ),
+            None,
+        )
+        if selected is not None:
+            return selected
+    else:
+        for default_name in default_playback_device_names():
+            if _is_cable_name(default_name):
+                continue
+            selected = next(
+                (
+                    item
+                    for item in physical
+                    if _name_matches(str(item.get("name", "")), default_name)
+                ),
+                None,
+            )
+            if selected is not None:
+                return selected
+
+    # When every Windows default role points to VB-CABLE, prefer an endpoint
+    # that looks like an audible local device rather than HDMI/monitor output.
+    audible_words = (
+        "speaker", "headphone", "headset", "speakers",
+        "динами", "науш", "навуш", "гарнітур", "гарнит",
+    )
+    silent_words = ("hdmi", "display", "monitor", "digital", "spdif", "s/pdif")
+
+    def fallback_score(item) -> int:
+        name = str(item.get("name", "")).casefold()
+        return (
+            10 * sum(word in name for word in audible_words)
+            - 10 * sum(word in name for word in silent_words)
+        )
+
+    return max(physical, key=fallback_score)
+
+
 def list_output_devices() -> list[str]:
     """Return physical playback endpoint names, keeping the default first."""
     if miniaudio is None:
         return []
     try:
         inventory = miniaudio.Devices()
-        names = [str(item.get("name", "")).strip() for item in inventory.get_playbacks()]
+        playbacks = inventory.get_playbacks()
+        selected = choose_output_device(playbacks)
+        ordered = ([selected] if selected is not None else []) + [
+            item for item in playbacks if item is not selected
+        ]
+        names = [str(item.get("name", "")).strip() for item in ordered]
     except Exception:
         return []
     return list(
         dict.fromkeys(
             name for name in names
-            if name and not WindowsMediaPlayer._is_cable(name)
+            if name and not _is_cable_name(name)
         )
     )
 
@@ -57,10 +139,7 @@ class WindowsMediaPlayer:
 
     @staticmethod
     def _is_cable(name: str) -> bool:
-        lowered = name.casefold()
-        return "cable" in lowered and (
-            "vb-audio" in lowered or "input" in lowered or "output" in lowered
-        )
+        return _is_cable_name(name)
 
     def _open_output(self) -> None:
         if miniaudio is None:
@@ -73,24 +152,7 @@ class WindowsMediaPlayer:
             # virtual microphone a second time.
             self._inventory = miniaudio.Devices()
             playbacks = self._inventory.get_playbacks()
-            physical_playbacks = [
-                item for item in playbacks
-                if not self._is_cable(str(item.get("name", "")))
-            ]
-            selected = None
-            if self._output_device_name:
-                selected = next(
-                    (
-                        item for item in physical_playbacks
-                        if str(item.get("name", "")) == self._output_device_name
-                    ),
-                    None,
-                )
-            if selected is None:
-                # miniaudio keeps the Windows default first.  Filtering the
-                # list preserves it when it is physical and safely falls back
-                # to another physical endpoint when the default is VB-CABLE.
-                selected = next(iter(physical_playbacks), None)
+            selected = choose_output_device(playbacks, self._output_device_name)
             if selected is None:
                 raise PlayerError(
                     "Не знайдено фізичний пристрій виведення. "

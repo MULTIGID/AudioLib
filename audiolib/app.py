@@ -55,7 +55,7 @@ from .virtual_audio import (
     launch_driver_setup,
     prepare_official_installer,
 )
-from .windows_file_dialog import FileDialogError, choose_files, choose_save_file
+from .windows_file_dialog import FileDialogError, choose_files, choose_folder
 
 
 BG = "#111827"
@@ -2895,6 +2895,12 @@ class AudioLibraryApp:
             new_x = int(event.x_root - self.root.winfo_width() * relative_x)
             new_y = event.y_root - 15
             self.root.geometry(f"+{new_x}+{new_y}")
+            # geometry() is applied asynchronously.  Reading winfo_x/y here can
+            # still return the old maximized position and makes the restored
+            # window move at a large offset from the pointer.  The new position
+            # is already known, so keep the drag anchor based on it directly.
+            self._drag_offset = (event.x_root - new_x, event.y_root - new_y)
+            return
         self._drag_offset = (
             event.x_root - self.root.winfo_x(),
             event.y_root - self.root.winfo_y(),
@@ -6540,29 +6546,38 @@ class AudioLibraryApp:
         def make_library_backup() -> None:
             try:
                 stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                selected = choose_save_file(
+                selected = choose_folder(
                     window,
-                    title="Зберегти резервну копію AudioLib",
-                    filetypes=[("Резервна копія AudioLib", "*.zip")],
-                    default_name=f"AudioLib_backup_{stamp}.zip",
-                    default_extension="zip",
+                    title="Оберіть папку для резервної копії AudioLib",
                 )
                 if not selected:
                     return
                 self.store.connection.commit()
-            except (FileDialogError, OSError) as error:
+            except (FileDialogError, OSError, tk.TclError) as error:
                 _showerror("Резервна копія", str(error), parent=window)
                 return
-            destination = Path(selected)
+            destination = Path(selected) / f"AudioLib_backup_{stamp}.zip"
             set_library_busy(True, "Створення резервної копії…")
             self.status_text.set("Створення резервної копії…")
+            backup_results: queue.Queue[
+                tuple[Path | None, Exception | None]
+            ] = queue.Queue(maxsize=1)
 
             def worker() -> None:
                 try:
                     result = create_backup(self.root_dir, destination)
-                    self.root.after(0, lambda: backup_finished(result, None))
+                    backup_results.put((result, None))
                 except Exception as error:
-                    self.root.after(0, lambda error=error: backup_finished(None, error))
+                    backup_results.put((None, error))
+
+            def poll_backup_result() -> None:
+                try:
+                    result, error = backup_results.get_nowait()
+                except queue.Empty:
+                    if window.winfo_exists():
+                        self.root.after(25, poll_backup_result)
+                    return
+                backup_finished(result, error)
 
             def backup_finished(result: Path | None, error: Exception | None) -> None:
                 set_library_busy(False)
@@ -6579,6 +6594,7 @@ class AudioLibraryApp:
                 )
 
             threading.Thread(target=worker, daemon=True).start()
+            self.root.after(25, poll_backup_result)
 
         def import_library_backup() -> None:
             try:
@@ -6602,17 +6618,33 @@ class AudioLibraryApp:
             self._clear_player()
             self.stop_virtual_microphone_sound()
             self.hotkey_manager.close()
+            if self._volume_save_job is not None:
+                try:
+                    self.root.after_cancel(self._volume_save_job)
+                except tk.TclError:
+                    pass
+                self._volume_save_job = None
             self.store.connection.commit()
             self.store.close()
             set_library_busy(True, "Імпорт і перевірка резервної копії…")
             self.status_text.set("Імпорт резервної копії…")
+            import_results: queue.Queue[Exception | None] = queue.Queue(maxsize=1)
 
             def worker() -> None:
                 try:
                     restore_backup(self.root_dir, Path(selected[0]))
-                    self.root.after(0, lambda: import_finished(None))
+                    import_results.put(None)
                 except Exception as error:
-                    self.root.after(0, lambda error=error: import_finished(error))
+                    import_results.put(error)
+
+            def poll_import_result() -> None:
+                try:
+                    error = import_results.get_nowait()
+                except queue.Empty:
+                    if window.winfo_exists():
+                        self.root.after(25, poll_import_result)
+                    return
+                import_finished(error)
 
             def import_finished(error: Exception | None) -> None:
                 self.store = LibraryStore(self.root_dir)
@@ -6640,18 +6672,30 @@ class AudioLibraryApp:
                     local_monitoring=bool(self.app_settings["local_monitoring"]),
                     monitor_output_name=str(self.app_settings["output_device"]),
                 )
+                # The database and image files were replaced underneath the
+                # current widgets.  Drop every view/cache tied to the old
+                # library before rebuilding the visible lists.
+                self._photo_cache.clear()
                 self.selected_person_id = None
+                if self.person_query.get():
+                    self.person_query.set("")
+                if self.track_query.get():
+                    self.track_query.set("")
+                self.refresh_people()
                 self.select_person(FAVORITES_PERSON_ID)
+                self.people_canvas.yview_moveto(0.0)
+                self.track_table.yview("moveto", 0.0)
                 self._refresh_tray_favorites()
                 self.status_text.set("Бібліотеку відновлено з резервної копії")
-                window.destroy()
+                close_settings()
                 _showinfo(
                     "Імпорт завершено",
-                    "Бібліотеку відновлено. Перезапустіть AudioLib, щоб застосувати налаштування з копії.",
+                    "Бібліотеку відновлено з резервної копії",
                     parent=self.root,
                 )
 
             threading.Thread(target=worker, daemon=True).start()
+            self.root.after(25, poll_import_result)
 
         backup_button = self._button(
             library_actions, "Створити копію", make_library_backup, "#0f766e"

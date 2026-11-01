@@ -81,6 +81,7 @@ UK_TO_EN = {
     "Збалансовано": "Balanced",
     "Зберегти": "Save",
     "Зберегти резервну копію AudioLib": "Save an AudioLib backup",
+    "Оберіть папку для резервної копії AudioLib": "Select a folder for the AudioLib backup",
     "Звичайно": "Comfortable",
     "Звук у віртуальному мікрофоні зупинено": "Virtual microphone audio stopped",
     "Згортати в трей": "Minimize to tray",

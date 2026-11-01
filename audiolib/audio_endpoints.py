@@ -19,6 +19,9 @@ if os.name == "nt":
 CAPTURE_ENDPOINTS_KEY = (
     r"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture"
 )
+RENDER_ENDPOINTS_KEY = (
+    r"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render"
+)
 FRIENDLY_NAME_VALUE = "{a45c254e-df1c-4efd-8020-67d146a850e0},2"
 DEVICE_DESCRIPTION_VALUE = "{b3f8fa53-0004-438e-9003-51a46e139bfc},6"
 DEVICE_STATE_ACTIVE = 0x00000001
@@ -154,6 +157,123 @@ def microphone_label(endpoint: CaptureEndpoint) -> str:
     if endpoint.description and endpoint.description.casefold() not in endpoint.friendly_name.casefold():
         return f"{endpoint.friendly_name} ({endpoint.description})"
     return endpoint.friendly_name
+
+
+def _release_com_object(instance: ctypes.c_void_p | None) -> None:
+    if not instance or not instance.value:
+        return
+    table = ctypes.cast(
+        instance, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))
+    ).contents
+    release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(table[2])
+    release(instance)
+
+
+def _render_endpoint_labels(endpoint_id: str) -> tuple[str, ...]:
+    if os.name != "nt":
+        return ()
+    endpoint_key_name = endpoint_id.rsplit(".", 1)[-1]
+    access = winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0)
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            RENDER_ENDPOINTS_KEY + "\\" + endpoint_key_name + r"\Properties",
+            0,
+            access,
+        ) as properties:
+            friendly = str(winreg.QueryValueEx(properties, FRIENDLY_NAME_VALUE)[0]).strip()
+            try:
+                description = str(
+                    winreg.QueryValueEx(properties, DEVICE_DESCRIPTION_VALUE)[0]
+                ).strip()
+            except FileNotFoundError:
+                description = ""
+    except (FileNotFoundError, PermissionError, OSError):
+        return ()
+    labels = [friendly]
+    if description:
+        labels.append(description)
+        if description.casefold() not in friendly.casefold():
+            labels.append(f"{friendly} ({description})")
+    return tuple(dict.fromkeys(label for label in labels if label))
+
+
+def default_playback_device_names() -> list[str]:
+    """Return Windows default render endpoint labels for all endpoint roles."""
+    if os.name != "nt":
+        return []
+    ole32 = ctypes.WinDLL("ole32")
+    ole32.CoInitializeEx.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    ole32.CoInitializeEx.restype = ctypes.c_long
+    ole32.CoUninitialize.argtypes = []
+    ole32.CoCreateInstance.argtypes = [
+        ctypes.POINTER(_GUID),
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.POINTER(_GUID),
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    ole32.CoCreateInstance.restype = ctypes.c_long
+    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+    initialized = False
+    enumerator = ctypes.c_void_p()
+    labels: list[str] = []
+    try:
+        init_result = ole32.CoInitializeEx(None, COINIT_APARTMENTTHREADED)
+        initialized = init_result >= 0
+        if init_result < 0 and init_result != RPC_E_CHANGED_MODE:
+            return []
+        class_id = _GUID.from_string(CLSID_MMDEVICE_ENUMERATOR)
+        interface_id = _GUID.from_string(IID_MMDEVICE_ENUMERATOR)
+        result = ole32.CoCreateInstance(
+            ctypes.byref(class_id),
+            None,
+            CLSCTX_ALL,
+            ctypes.byref(interface_id),
+            ctypes.byref(enumerator),
+        )
+        if result < 0 or not enumerator.value:
+            return []
+        table = ctypes.cast(
+            enumerator, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))
+        ).contents
+        get_default = ctypes.WINFUNCTYPE(
+            ctypes.c_long,
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_void_p),
+        )(table[4])
+        for role in ENDPOINT_ROLES:
+            device = ctypes.c_void_p()
+            try:
+                if get_default(enumerator, 0, role, ctypes.byref(device)) < 0:
+                    continue
+                device_table = ctypes.cast(
+                    device, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))
+                ).contents
+                get_id = ctypes.WINFUNCTYPE(
+                    ctypes.c_long,
+                    ctypes.c_void_p,
+                    ctypes.POINTER(ctypes.c_void_p),
+                )(device_table[5])
+                endpoint_id_pointer = ctypes.c_void_p()
+                if get_id(device, ctypes.byref(endpoint_id_pointer)) < 0:
+                    continue
+                try:
+                    endpoint_id = ctypes.wstring_at(endpoint_id_pointer.value)
+                    labels.extend(_render_endpoint_labels(endpoint_id))
+                finally:
+                    ole32.CoTaskMemFree(endpoint_id_pointer)
+            finally:
+                _release_com_object(device)
+    except (AttributeError, OSError, ValueError):
+        return []
+    finally:
+        _release_com_object(enumerator)
+        if initialized:
+            ole32.CoUninitialize()
+    return list(dict.fromkeys(labels))
 
 
 def _find_endpoint_by_id(endpoint_id: str, *, active_only: bool = False) -> CaptureEndpoint | None:

@@ -12,6 +12,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from .player import choose_output_device
+
 try:
     import miniaudio
     _MINIAUDIO_IMPORT_ERROR = None
@@ -341,21 +343,10 @@ class VirtualMicrophoneBridge:
                 # became the default endpoint, the selected recording was fed
                 # into the cable twice (main mix + monitor), causing echo,
                 # distortion and duplicate audio in Discord screen sharing.
-                physical_playbacks = [
-                    item for item in playbacks
-                    if not self._is_cable(str(item.get("name", "")))
-                ]
-                monitor = None
-                if self._monitor_output_name:
-                    monitor = next(
-                        (
-                            item for item in physical_playbacks
-                            if item.get("name") == self._monitor_output_name
-                        ),
-                        None,
-                    )
-                if monitor is None:
-                    monitor = next(iter(physical_playbacks), None)
+                monitor = choose_output_device(
+                    playbacks,
+                    self._monitor_output_name,
+                )
                 if monitor is not None:
                     self.monitor_name = str(monitor.get("name", ""))
                     self._monitor_device = miniaudio.PlaybackDevice(
