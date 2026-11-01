@@ -11,7 +11,7 @@ if not exist ".venv\Scripts\python.exe" (
 ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check pyinstaller
 if errorlevel 1 goto :error
 
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --windowed --noupx --name AudioLib --icon "assets\audiolib_icon.ico" --add-data "assets\audiolib_icon.png;assets" --add-data "assets\audiolib_icon.ico;assets" --add-data "assets\favorites_icon.png;assets" --add-data "assets\favorites_icon.svg;assets" --version-file version_info.txt --additional-hooks-dir build_hooks --exclude-module PIL.AvifImagePlugin --exclude-module PIL.ImageCms --exclude-module PIL.ImageMath --exclude-module PIL._imagingcms --exclude-module PIL._imagingmath --collect-all pystray --collect-all miniaudio --collect-all cffi --hidden-import _cffi_backend main.py
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --windowed --noupx --name AudioLib --icon "assets\audiolib_icon.ico" --add-data "assets\audiolib_icon.png;assets" --add-data "assets\audiolib_icon.ico;assets" --add-data "assets\favorites_icon.png;assets" --add-data "assets\favorites_icon.svg;assets" --version-file version_info.txt --additional-hooks-dir build_hooks --exclude-module PIL.AvifImagePlugin --exclude-module PIL.ImageCms --exclude-module PIL.ImageMath --exclude-module PIL._imagingcms --exclude-module PIL._imagingmath --collect-all pystray --collect-all miniaudio --collect-all cffi --collect-all truststore --hidden-import _cffi_backend main.py
 if errorlevel 1 goto :error
 
 if exist "data" (

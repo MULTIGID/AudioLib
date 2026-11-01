@@ -50,6 +50,13 @@ def is_newer_version(candidate: str, current: str) -> bool:
 
 
 def _create_ssl_context() -> ssl.SSLContext:
+    if sys.platform == "win32":
+        try:
+            import truststore
+
+            return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        except ImportError:
+            pass
     context = ssl.create_default_context()
     if sys.platform != "win32" or not hasattr(ssl, "enum_certificates"):
         return context
