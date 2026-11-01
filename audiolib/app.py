@@ -43,7 +43,7 @@ from .hotkeys import (
     hotkey_from_tk_event,
     parse_hotkey,
 )
-from .i18n import set_language, tr
+from .i18n import get_language, set_language, tr
 from .player import PlayerError, WindowsMediaPlayer, list_output_devices
 from .startup import register_autostart, unregister_autostart
 from .storage import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, LibraryStore, Person, Track
@@ -1834,6 +1834,7 @@ class AudioLibraryApp:
         self.app_settings_path = root_dir / "data" / "app_settings.json"
         self.app_settings = self._load_app_settings()
         set_language(str(self.app_settings["language"]))
+        self.restart_requested = False
         self._apply_saved_accent()
         self.start_hidden = start_hidden
         self.store = LibraryStore(root_dir)
@@ -5709,7 +5710,10 @@ class AudioLibraryApp:
         )
         language_keys = ["uk", "en"]
         language_labels = ["Українська", "English"]
-        current_language = str(self.app_settings.get("language", "uk"))
+        active_language = get_language()
+        current_language = str(self.app_settings.get("language", active_language))
+        if current_language not in language_keys:
+            current_language = active_language
         language_value = tk.StringVar(
             value=language_labels[language_keys.index(current_language)]
         )
@@ -5867,29 +5871,59 @@ class AudioLibraryApp:
             anchor="w",
             font=("Segoe UI Semibold", 10),
         ).pack(fill="x", pady=(0, 5))
+        language_controls = tk.Frame(language_row, bg=PANEL)
+        language_controls.pack(fill="x")
+
+        restart_note = LocalizedLabel(
+            language_row,
+            text="Перезапустіть AudioLib, щоб застосувати зміни.",
+            bg=PANEL,
+            fg=MUTED,
+            anchor="w",
+            font=("Segoe UI", 9),
+        )
+
+        def request_restart() -> None:
+            self.restart_requested = True
+            close_settings()
+            self._close()
+
+        restart_button = self._button(
+            language_controls,
+            "Перезапустити",
+            request_restart,
+            "#475569",
+        )
+
+        def update_language_restart_state(selected_language: str) -> None:
+            restart_needed = selected_language != active_language
+            restart_button.configure(
+                state="normal" if restart_needed else "disabled"
+            )
+            if restart_needed:
+                if not restart_note.winfo_manager():
+                    restart_note.pack(fill="x", pady=(5, 0))
+            elif restart_note.winfo_manager():
+                restart_note.pack_forget()
+
         def apply_language(index: int) -> None:
             if not 0 <= index < len(language_keys):
                 return
-            save_setting("language", language_keys[index])
-            status.set("Мову змінено. Перезапустіть AudioLib, щоб застосувати зміни.")
+            selected_language = language_keys[index]
+            save_setting("language", selected_language)
+            update_language_restart_state(selected_language)
 
         language_dropdown = RoundedDropdown(
-            language_row,
+            language_controls,
             textvariable=language_value,
             command=apply_language,
             width=520,
         )
         language_dropdown.configure(values=language_labels)
         language_dropdown.current(language_keys.index(current_language))
-        language_dropdown.pack(fill="x")
-        LocalizedLabel(
-            language_row,
-            text="Зміни мови застосовуються після перезапуску AudioLib.",
-            bg=PANEL,
-            fg=MUTED,
-            anchor="w",
-            font=("Segoe UI", 9),
-        ).pack(fill="x", pady=(5, 0))
+        language_dropdown.pack(side="left", fill="x", expand=True)
+        restart_button.pack(side="right", padx=(8, 0))
+        update_language_restart_state(current_language)
 
         window_size_row = tk.Frame(general_panel, bg=PANEL)
         window_size_row.pack(fill="x", pady=(10, 5))

@@ -2,6 +2,7 @@ import ctypes
 from datetime import datetime
 import json
 from pathlib import Path
+import subprocess
 import sys
 
 from audiolib.audio_endpoints import WindowsMicrophoneRouting
@@ -145,3 +146,9 @@ if __name__ == "__main__":
     finally:
         if event_handle:
             kernel32.CloseHandle(event_handle)
+    if app.restart_requested:
+        if getattr(sys, "frozen", False):
+            restart_command = [sys.executable]
+        else:
+            restart_command = [sys.executable, str(Path(__file__).resolve())]
+        subprocess.Popen(restart_command, cwd=application_root)
