@@ -16,7 +16,7 @@ from audiolib.startup import (
 
 ERROR_ALREADY_EXISTS = 183
 WAIT_OBJECT_0 = 0
-INSTANCE_EVENT_NAME = "Local\\MULTIGID.AudioLib.2.8.1.ShowWindow"
+INSTANCE_EVENT_NAME = "Local\\MULTIGID.AudioLib.2.8.2.ShowWindow"
 
 
 def _application_root() -> Path:
@@ -58,6 +58,16 @@ def _startup_preferences(root_dir: Path) -> tuple[bool, bool]:
         return enabled, minimized
     except (FileNotFoundError, OSError, ValueError, TypeError, AttributeError):
         return False, True
+
+
+def _startup_language(root_dir: Path) -> str:
+    try:
+        payload = json.loads(
+            (root_dir / "data" / "app_settings.json").read_text(encoding="utf-8")
+        )
+        return "en" if payload.get("language") == "en" else "uk"
+    except (FileNotFoundError, OSError, ValueError, TypeError, AttributeError):
+        return "uk"
 
 
 def _cleanup_old_startup_entries(
@@ -140,9 +150,44 @@ if __name__ == "__main__":
     if already_running:
         raise SystemExit(0)
 
-    from audiolib.app import AudioLibraryApp
+    splash = None
+    startup_root = None
+    if not start_hidden:
+        try:
+            import tkinter as tk
 
-    app = AudioLibraryApp(application_root, start_hidden=start_hidden)
+            from audiolib.startup_splash import StartupSplash
+
+            startup_root = tk.Tk()
+            startup_root.withdraw()
+            splash = StartupSplash(
+                application_root,
+                language=_startup_language(application_root),
+                master=startup_root,
+            )
+            splash.update(12, "Підготовка компонентів…", "Preparing components…")
+        except Exception:
+            splash = None
+
+    try:
+        from audiolib.app import AudioLibraryApp
+
+        if splash is not None:
+            splash.update(28, "Завантаження бібліотеки…", "Loading library…")
+        app = AudioLibraryApp(
+            application_root,
+            start_hidden=start_hidden,
+            startup_progress=splash.update if splash is not None else None,
+            root=startup_root,
+        )
+        if splash is not None:
+            splash.update(100, "Готово", "Ready")
+    finally:
+        if splash is not None:
+            splash.close()
+    if startup_root is not None and not start_hidden:
+        app.root.deiconify()
+        app.root.lift()
 
     def poll_show_event() -> None:
         if event_handle and kernel32.WaitForSingleObject(event_handle, 0) == WAIT_OBJECT_0:

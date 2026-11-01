@@ -1995,7 +1995,21 @@ class OperationProgressDialog:
 
 
 class AudioLibraryApp:
-    def __init__(self, root_dir: Path, start_hidden: bool = False) -> None:
+    def __init__(
+        self,
+        root_dir: Path,
+        start_hidden: bool = False,
+        startup_progress=None,
+        root: tk.Tk | None = None,
+    ) -> None:
+        def report_startup(value: int, uk_status: str, en_status: str) -> None:
+            if startup_progress is None:
+                return
+            try:
+                startup_progress(value, uk_status, en_status)
+            except Exception:
+                pass
+
         self.root_dir = root_dir
         self.app_settings_path = root_dir / "data" / "app_settings.json"
         self.app_settings = self._load_app_settings()
@@ -2013,7 +2027,9 @@ class AudioLibraryApp:
         self.update_manager.cleanup_stale_downloads()
         self._apply_saved_accent()
         self.start_hidden = start_hidden
+        report_startup(36, "Відкриття бази даних…", "Opening database…")
         self.store = LibraryStore(root_dir)
+        report_startup(45, "Підготовка аудіосистеми…", "Preparing audio system…")
         self.player = WindowsMediaPlayer()
         self.virtual_microphone = VirtualMicrophoneBridge()
         self.player.set_normalization_enabled(
@@ -2033,7 +2049,8 @@ class AudioLibraryApp:
         self._volume_save_job = None
         self._session_wndproc = None
         self._previous_wndproc = None
-        self.root = tk.Tk()
+        self.root = root if root is not None else tk.Tk()
+        report_startup(58, "Створення головного вікна…", "Creating main window…")
         self.root.title(tr("AudioLib — локальна бібліотека аудіозаписів"))
         window_width = DEFAULT_WINDOW_WIDTH
         window_height = DEFAULT_WINDOW_HEIGHT
@@ -2135,6 +2152,7 @@ class AudioLibraryApp:
             "random": self._make_header_action_icon("dice"),
         }
         self._configure_styles()
+        report_startup(70, "Побудова інтерфейсу…", "Building interface…")
         self._build_ui()
         self._create_resize_grips()
         self.root.bind("<Map>", self._on_root_map, add="+")
@@ -2148,6 +2166,7 @@ class AudioLibraryApp:
             if isinstance(last_person_id, int) and self.store.get_person(last_person_id):
                 startup_person_id = last_person_id
         self.select_person(startup_person_id)
+        report_startup(84, "Завантаження списку записів…", "Loading recordings…")
         self._refresh_tray_favorites()
         self._reload_global_hotkeys()
         self.refresh_tracks()
@@ -2157,6 +2176,7 @@ class AudioLibraryApp:
         self.root.after(10, self._poll_library_task_results)
         self._refresh_legacy_metadata_async()
         self._start_tray_icon()
+        report_startup(94, "Завершення запуску…", "Finishing startup…")
         if self.start_hidden:
             self.root.withdraw()
         if self.app_settings["auto_virtual_microphone"]:
