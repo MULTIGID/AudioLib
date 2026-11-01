@@ -7,6 +7,12 @@ AudioLib is a local audio library for Windows with categories, global hotkeys, s
 
 Current version: **2.8.3**.
 
+## Ready-to-use Windows build
+
+Download the latest ZIP archive from [Releases](../../releases/latest), extract it to a regular folder, and run `AudioLib.exe`.
+
+Do not run the application directly from inside the ZIP archive.
+
 ## Features
 
 - categories with custom images and track counters;
@@ -27,12 +33,6 @@ Current version: **2.8.3**.
 - background update checks and secure in-app installation from GitHub Releases without replacing the local library.
 
 All images, recordings, database files, and settings are stored locally in the `data` directory and are never sent to the developer.
-
-## Ready-to-use Windows build
-
-Download the latest ZIP archive from [Releases](../../releases/latest), extract it to a regular folder, and run `AudioLib.exe`.
-
-Do not run the application directly from inside the ZIP archive.
 
 ## Running from source
 

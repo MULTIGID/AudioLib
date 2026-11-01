@@ -23,6 +23,10 @@ dist/
 # Packaged releases belong in GitHub Releases, not Git history
 AudioLib_*.zip
 
+# Local release preparation helpers
+prepare_release.ps1
+release_commands.txt
+
 # Personal library, recordings, photos, backups, and local settings
 data/
 SOUNDS/
