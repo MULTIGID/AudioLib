@@ -17,7 +17,7 @@ from audiolib.startup import (
 
 ERROR_ALREADY_EXISTS = 183
 WAIT_OBJECT_0 = 0
-INSTANCE_EVENT_NAME = "Local\\MULTIGID.AudioLib.2.8.5.ShowWindow"
+INSTANCE_EVENT_NAME = "Local\\MULTIGID.AudioLib.2.8.6.ShowWindow"
 
 
 def _application_root() -> Path:

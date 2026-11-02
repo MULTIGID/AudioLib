@@ -104,6 +104,7 @@ UK_TO_EN = {
     "Зупиняє будь-який активний запис у динаміках і мікрофоні.": "Stops any active recording in the speakers and microphone.",
     "Категорії": "Categories",
     "Колір акценту": "Accent color",
+    "Колір акценту застосовано": "Accent color applied",
     "Колір акценту збережено; усі елементи оновляться після перезапуску": "Accent color saved; all elements will update after restart",
     "Компактно": "Compact",
     "Локальна бібліотека аудіозаписів": "Local audio recording library",

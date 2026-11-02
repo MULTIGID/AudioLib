@@ -260,6 +260,31 @@ def render_media_control_image(
     return ImageTk.PhotoImage(image)
 
 
+def render_scrollbar_thumb_image(
+    color: str,
+    *,
+    horizontal: bool = False,
+) -> Image.Image:
+    """Render an antialiased scrollbar thumb that can be recolored live."""
+    scale = 4
+    logical_width, logical_height = ((32, 12) if horizontal else (12, 32))
+    image = Image.new(
+        "RGBA",
+        (logical_width * scale, logical_height * scale),
+        (0, 0, 0, 0),
+    )
+    draw = ImageDraw.Draw(image)
+    if horizontal:
+        bounds = (0, 2 * scale, 32 * scale - 1, 10 * scale - 1)
+    else:
+        bounds = (2 * scale, 0, 10 * scale - 1, 32 * scale - 1)
+    draw.rounded_rectangle(bounds, radius=4 * scale, fill=color)
+    return image.resize(
+        (logical_width, logical_height),
+        Image.Resampling.LANCZOS,
+    )
+
+
 def render_rounded_surface(
     width: int,
     height: int,
@@ -456,9 +481,11 @@ class RoundedButton(tk.Canvas):
         pady: int = 8,
         font=("Segoe UI Semibold", 10),
         image: ImageTk.PhotoImage | None = None,
+        media_control: bool = True,
     ) -> None:
         self.text = tr(text)
         self.button_image = image
+        self.media_control = media_control
         self.command = command
         self.normal_color = color
         self.hover_color = hover_color
@@ -492,7 +519,11 @@ class RoundedButton(tk.Canvas):
         self._draw()
 
     def _requested_size(self) -> tuple[int, int]:
-        if self.button_image is None and self.text in {"▶", "■", "Ⅱ", "‖"}:
+        if (
+            self.media_control
+            and self.button_image is None
+            and self.text in {"▶", "■", "Ⅱ", "‖"}
+        ):
             return 40, 40
         image_width = self.button_image.width() if self.button_image else 0
         image_height = self.button_image.height() if self.button_image else 0
@@ -521,7 +552,11 @@ class RoundedButton(tk.Canvas):
         # Application buttons use dark accent surfaces in both themes, so
         # their active label/icon must stay white for reliable contrast.
         symbol_color = PLACEHOLDER if self.state == "disabled" else "#ffffff"
-        if self.button_image is None and self.text in {"▶", "■", "Ⅱ", "‖"}:
+        if (
+            self.media_control
+            and self.button_image is None
+            and self.text in {"▶", "■", "Ⅱ", "‖"}
+        ):
             diameter = min(width, height)
             self._media_button_image = render_media_control_image(
                 diameter,
@@ -1967,6 +2002,16 @@ class CustomTrackTable(tk.Frame):
                         anchor=canvas_anchor,
                         tags="row",
                     )
+            if row_index < len(self._rows) - 1:
+                self.body.create_line(
+                    10,
+                    y2 - 1,
+                    max(10, total_width - 10),
+                    y2 - 1,
+                    fill=BORDER,
+                    width=1,
+                    tags="row",
+                )
 
     def _draw_tiles(self) -> None:
         top = max(0.0, self.body.canvasy(0))
@@ -2308,6 +2353,7 @@ class AudioLibraryApp:
         self._restore_override_after_map = False
         self._taskbar_style_initialized = False
         self.resize_grips: list[tk.Frame] = []
+        self._accent_buttons: list[tk.Widget] = []
         self.app_icon: ImageTk.PhotoImage | None = None
         self.tray_icon = None
         self.tray_window: tk.Toplevel | None = None
@@ -2358,6 +2404,10 @@ class AudioLibraryApp:
         self.now_playing = LocalizedStringVar(value="Оберіть запис")
         self.time_text = tk.StringVar(value="0:00 / 0:00")
         self.status_text = LocalizedStringVar(value="Готово")
+        self.categories_collapsed = bool(
+            self.app_settings.get("categories_collapsed", False)
+        )
+        self._categories_expanded_width = 390
         self.track_sort_column = "title"
         self.track_sort_descending = False
         self.source_column_visible = False
@@ -2454,6 +2504,7 @@ class AudioLibraryApp:
             "theme": "dark",
             "window_geometry": None,
             "check_updates_on_startup": True,
+            "categories_collapsed": False,
         }
         try:
             payload = json.loads(self.app_settings_path.read_text(encoding="utf-8"))
@@ -2484,6 +2535,7 @@ class AudioLibraryApp:
             ("local_monitoring", True),
             ("kernel_streaming_cable", True),
             ("check_updates_on_startup", True),
+            ("categories_collapsed", False),
         ):
             if not isinstance(defaults[key], bool):
                 defaults[key] = fallback
@@ -3012,8 +3064,8 @@ class AudioLibraryApp:
             (0, 0), window=self.tray_window_items, anchor="nw"
         )
         self.tray_window_canvas.configure(yscrollcommand=scrollbar.set)
-        self.tray_window_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+        self.tray_window_canvas.pack(side="left", fill="both", expand=True)
         self.tray_window_items.bind(
             "<Configure>",
             lambda _event: self.tray_window_canvas.configure(
@@ -3957,37 +4009,19 @@ class AudioLibraryApp:
             thickness=7,
         )
 
-        def scrollbar_thumb(color: str) -> ImageTk.PhotoImage:
-            scale = 4
-            image = Image.new("RGBA", (12 * scale, 32 * scale), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(image)
-            draw.rounded_rectangle(
-                (2 * scale, 0, 10 * scale - 1, 32 * scale - 1),
-                radius=4 * scale,
-                fill=color,
-            )
-            image = image.resize((12, 32), Image.Resampling.LANCZOS)
-            return ImageTk.PhotoImage(image)
-
-        def horizontal_scrollbar_thumb(color: str) -> ImageTk.PhotoImage:
-            scale = 4
-            image = Image.new("RGBA", (32 * scale, 12 * scale), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(image)
-            draw.rounded_rectangle(
-                (0, 2 * scale, 32 * scale - 1, 10 * scale - 1),
-                radius=4 * scale,
-                fill=color,
-            )
-            image = image.resize((32, 12), Image.Resampling.LANCZOS)
-            return ImageTk.PhotoImage(image)
-
         self.scrollbar_images = {
-            "normal": scrollbar_thumb(BORDER),
-            "active": scrollbar_thumb(ACCENT),
-            "pressed": scrollbar_thumb(ACCENT_HOVER),
-            "horizontal_normal": horizontal_scrollbar_thumb(BORDER),
-            "horizontal_active": horizontal_scrollbar_thumb(ACCENT),
-            "horizontal_pressed": horizontal_scrollbar_thumb(ACCENT_HOVER),
+            "normal": ImageTk.PhotoImage(render_scrollbar_thumb_image(BORDER)),
+            "active": ImageTk.PhotoImage(render_scrollbar_thumb_image(ACCENT)),
+            "pressed": ImageTk.PhotoImage(render_scrollbar_thumb_image(ACCENT_HOVER)),
+            "horizontal_normal": ImageTk.PhotoImage(
+                render_scrollbar_thumb_image(BORDER, horizontal=True)
+            ),
+            "horizontal_active": ImageTk.PhotoImage(
+                render_scrollbar_thumb_image(ACCENT, horizontal=True)
+            ),
+            "horizontal_pressed": ImageTk.PhotoImage(
+                render_scrollbar_thumb_image(ACCENT_HOVER, horizontal=True)
+            ),
         }
         style.element_create(
             "AudioLib.Scrollbar.thumb",
@@ -4070,7 +4104,9 @@ class AudioLibraryApp:
         *,
         rounded: bool = True,
         image: ImageTk.PhotoImage | None = None,
+        media_control: bool = True,
     ) -> tk.Widget:
+        uses_accent = color is None or color == ACCENT
         color = color or ACCENT
         hover_colors = {
             ACCENT: ACCENT_HOVER,
@@ -4080,14 +4116,18 @@ class AudioLibraryApp:
         }
         hover_color = hover_colors.get(color, ACCENT_HOVER)
         if rounded:
-            return RoundedButton(
+            button = RoundedButton(
                 parent,
                 text,
                 command,
                 color,
                 hover_color,
                 image=image,
+                media_control=media_control,
             )
+            if uses_accent:
+                self._accent_buttons.append(button)
+            return button
         button = tk.Button(
             parent,
             text=text,
@@ -4105,6 +4145,8 @@ class AudioLibraryApp:
         )
         button.bind("<Enter>", lambda _event: button.configure(bg=hover_color))
         button.bind("<Leave>", lambda _event: button.configure(bg=color))
+        if uses_accent:
+            self._accent_buttons.append(button)
         return button
 
     def _ask_text(
@@ -4278,19 +4320,55 @@ class AudioLibraryApp:
             image=self.header_action_icons["settings"],
         ).pack(side="left")
 
-        body = tk.PanedWindow(self.root, orient="horizontal", bg=BG, sashwidth=6,
+        body = tk.PanedWindow(self.root, orient="horizontal", bg=BORDER, sashwidth=1,
                               sashrelief="flat", bd=0)
         body.pack(fill="both", expand=True, padx=18, pady=(0, 12))
-        left = tk.Frame(body, bg=PANEL, width=390)
-        right = tk.Frame(body, bg=BG)
+        left = tk.Frame(
+            body,
+            bg=PANEL,
+            width=390,
+            highlightbackground=BORDER,
+            highlightcolor=BORDER,
+            highlightthickness=1,
+            bd=0,
+        )
+        right = tk.Frame(
+            body,
+            bg=BG,
+            highlightbackground=BORDER,
+            highlightcolor=BORDER,
+            highlightthickness=1,
+            bd=0,
+        )
         body.add(left, minsize=300)
         body.add(right, minsize=500)
+        self.body_paned = body
+        self.categories_panel = left
 
         left_top = tk.Frame(left, bg=PANEL, padx=16, pady=14)
         left_top.pack(fill="x")
-        LocalizedLabel(left_top, text="Категорії", bg=PANEL, fg=TEXT,
-                 font=("Segoe UI Semibold", 16)).pack(side="left")
-        self._button(left_top, "+ Додати", self.add_person).pack(side="right")
+        self.categories_header = left_top
+        self.categories_title = LocalizedLabel(
+            left_top,
+            text="Категорії",
+            bg=PANEL,
+            fg=TEXT,
+            font=("Segoe UI Semibold", 16),
+        )
+        self.categories_title.pack(side="left")
+        self.add_person_button = self._button(
+            left_top, "+ Додати", self.add_person
+        )
+        self.add_person_button.pack(side="right")
+        self.categories_toggle_button = self._button(
+            left_top,
+            "▶" if self.categories_collapsed else "◀",
+            self._toggle_categories_panel,
+            SECONDARY,
+            media_control=False,
+        )
+        self.categories_toggle_button.configure(width=40, height=34)
+        self.categories_toggle_button.pack(side="right", padx=(0, 8))
         people_search_color = FIELD
         people_search_height = 38
         people_search_radius = 10
@@ -4302,6 +4380,7 @@ class AudioLibraryApp:
             bd=0,
         )
         people_search_container.pack(fill="x", padx=16)
+        self.people_search_container = people_search_container
 
         def draw_people_search_background(event) -> None:
             width = max(people_search_radius * 2, event.width)
@@ -4380,16 +4459,18 @@ class AudioLibraryApp:
         self.people_frame = tk.Frame(self.people_canvas, bg=PANEL)
         self.people_window = self.people_canvas.create_window((0, 0), window=self.people_frame, anchor="nw")
         self.people_canvas.configure(yscrollcommand=people_scroll.set)
-        self.people_canvas.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=12)
         people_scroll.pack(side="right", fill="y", pady=12)
+        self.people_canvas.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=12)
+        self.people_scroll = people_scroll
         self.people_frame.bind("<Configure>", lambda _: self.people_canvas.configure(
             scrollregion=self.people_canvas.bbox("all")))
         self.people_canvas.bind("<Configure>", lambda e: self.people_canvas.itemconfigure(
             self.people_window, width=e.width))
         self.root.bind_all("<MouseWheel>", self._on_people_mousewheel, add="+")
+        self.root.after_idle(self._apply_categories_panel_state)
 
         person_header = tk.Frame(right, bg=BG, pady=8)
-        person_header.pack(fill="x", padx=(18, 0))
+        person_header.pack(fill="x", padx=18)
         self.person_title = LocalizedLabel(person_header, text="Оберіть людину", bg=BG, fg=TEXT,
                                      font=("Segoe UI Semibold", 22))
         self.person_title.pack(side="left")
@@ -4399,13 +4480,14 @@ class AudioLibraryApp:
         self.edit_person_button.pack(side="right")
 
         tools = tk.Frame(right, bg=BG, pady=8)
-        tools.pack(fill="x", padx=(18, 0))
+        tools.pack(fill="x", padx=18)
         self.add_tracks_button = self._button(tools, "+ Додати аудіо", self.add_tracks)
-        self.add_tracks_button.pack(side="left")
+        self.add_tracks_button.grid(row=0, column=0, sticky="w")
         self.source_column_button = self._button(
             tools, "Показати оригінальну назву", self.toggle_source_column, SECONDARY
         )
-        self.source_column_button.pack(side="left", padx=(8, 0))
+        self.source_column_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        tools.grid_columnconfigure(2, weight=1)
         search_width = 270
         search_height = 38
         search_radius = 10
@@ -4418,19 +4500,27 @@ class AudioLibraryApp:
             highlightthickness=0,
             bd=0,
         )
-        search_container.pack(side="right")
-        search_container._surface_image = render_rounded_surface(
-            search_width,
-            search_height,
-            fill=search_color_hex,
-            radius=search_radius,
-        )
-        search_container.create_image(
-            0,
-            0,
-            image=search_container._surface_image,
-            anchor="nw",
-        )
+        search_container.grid(row=0, column=2, sticky="e", padx=(8, 0))
+
+        def draw_track_search_background(event: tk.Event) -> None:
+            width = max(search_radius * 2, event.width)
+            search_container.delete("search_background")
+            search_container._surface_image = render_rounded_surface(
+                width,
+                search_height,
+                fill=search_color_hex,
+                radius=search_radius,
+            )
+            search_container.create_image(
+                0,
+                0,
+                image=search_container._surface_image,
+                anchor="nw",
+                tags="search_background",
+            )
+            search_container.tag_lower("search_background")
+
+        search_container.bind("<Configure>", draw_track_search_background)
         self.track_search_entry = tk.Entry(
             search_container,
             textvariable=self.track_query,
@@ -4444,7 +4534,13 @@ class AudioLibraryApp:
             bd=0,
             font=("Segoe UI", 11),
         )
-        self.track_search_entry.place(x=10, y=3, width=250, height=32)
+        self.track_search_entry.place(
+            x=10,
+            y=3,
+            relwidth=1.0,
+            width=-20,
+            height=32,
+        )
         search_icon = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
         search_draw = ImageDraw.Draw(search_icon)
         search_color = (148, 163, 184, 255)
@@ -4473,14 +4569,41 @@ class AudioLibraryApp:
             "<FocusOut>", lambda _event: self._update_track_search_placeholder()
         )
 
+        tools_layout = {"compact": None}
+
+        def update_tools_layout(event: tk.Event) -> None:
+            compact = event.width < 660
+            if tools_layout["compact"] == compact:
+                return
+            tools_layout["compact"] = compact
+            search_container.grid_forget()
+            if compact:
+                search_container.grid(
+                    row=1,
+                    column=0,
+                    columnspan=3,
+                    sticky="ew",
+                    pady=(8, 0),
+                )
+            else:
+                search_container.configure(width=search_width)
+                search_container.grid(
+                    row=0,
+                    column=2,
+                    sticky="e",
+                    padx=(8, 0),
+                )
+
+        tools.bind("<Configure>", update_tools_layout, add="+")
+
         tk.Frame(right, bg=BORDER, height=1, bd=0).pack(
             fill="x",
-            padx=(18, 0),
+            padx=18,
             pady=(4, 0),
         )
 
         table_frame = tk.Frame(right, bg=BG)
-        table_frame.pack(fill="both", expand=True, padx=(18, 0), pady=(7, 8))
+        table_frame.pack(fill="both", expand=True, padx=18, pady=(7, 8))
         self.track_table = CustomTrackTable(
             table_frame,
             columns=tuple(self.track_heading_labels),
@@ -4533,7 +4656,7 @@ class AudioLibraryApp:
         self.track_table.bind("<Double-Button-1>", self._on_track_double_click)
 
         track_actions = tk.Frame(right, bg=BG, pady=4)
-        track_actions.pack(fill="x", padx=(18, 0))
+        track_actions.pack(fill="x", padx=18, pady=(0, 8))
         self.random_track_button = self._button(
             track_actions,
             "Випадковий запис",
@@ -4542,10 +4665,22 @@ class AudioLibraryApp:
             image=self.button_action_icons["random"],
         )
         self.random_track_button.pack(side="left", padx=(0, 8))
-        self._button(track_actions, "Перейменувати", self.rename_track, SECONDARY).pack(
-            side="left", padx=(0, 8)
+        self.rename_track_button = self._button(
+            track_actions,
+            "Перейменувати",
+            self.rename_track,
+            SECONDARY,
         )
-        self._button(track_actions, "Видалити запис", self.delete_track, DANGER).pack(side="left")
+        self.rename_track_button.pack(side="left", padx=(0, 8))
+        self.delete_track_button = self._button(
+            track_actions,
+            "Видалити запис",
+            self.delete_track,
+            DANGER,
+        )
+        self.delete_track_button.pack(side="left")
+        self.rename_track_button.configure(state="disabled")
+        self.delete_track_button.configure(state="disabled")
 
         player = tk.Frame(self.root, bg=PLAYER_BG, padx=18, pady=10)
         player.pack(fill="x")
@@ -4604,6 +4739,58 @@ class AudioLibraryApp:
         if inside_canvas and event.delta:
             direction = -1 if event.delta > 0 else 1
             self.people_canvas.yview_scroll(direction, "units")
+
+    def _apply_categories_panel_state(self) -> None:
+        """Apply the compact or expanded category-sidebar layout."""
+        if self.categories_collapsed:
+            self.categories_title.pack_forget()
+            self.add_person_button.pack_forget()
+            self.categories_toggle_button.pack_forget()
+            self.categories_toggle_button.configure(text="▶", width=40, height=34)
+            self.categories_toggle_button.pack(anchor="center")
+            self.people_search_container.pack_forget()
+            self.people_canvas.pack_configure(padx=(4, 0))
+            target_width = max(
+                116,
+                int(self.app_settings.get("photo_size", 92)) + 38,
+            )
+            self.body_paned.paneconfigure(
+                self.categories_panel,
+                minsize=target_width,
+            )
+        else:
+            self.categories_toggle_button.pack_forget()
+            self.categories_title.pack(side="left")
+            self.add_person_button.pack(side="right")
+            self.categories_toggle_button.configure(text="◀", width=40, height=34)
+            self.categories_toggle_button.pack(side="right", padx=(0, 8))
+            self.people_search_container.pack(
+                fill="x",
+                padx=16,
+                before=self.people_canvas,
+            )
+            self.people_canvas.pack_configure(padx=(10, 0))
+            target_width = max(300, self._categories_expanded_width)
+            self.body_paned.paneconfigure(self.categories_panel, minsize=300)
+
+        try:
+            self.body_paned.sash_place(0, target_width, 0)
+        except tk.TclError:
+            pass
+
+    def _toggle_categories_panel(self) -> None:
+        if not self.categories_collapsed:
+            try:
+                current_width = int(self.body_paned.sash_coord(0)[0])
+                if current_width >= 300:
+                    self._categories_expanded_width = current_width
+            except (tk.TclError, ValueError, TypeError):
+                pass
+        self.categories_collapsed = not self.categories_collapsed
+        self.app_settings["categories_collapsed"] = self.categories_collapsed
+        self._schedule_volume_save()
+        self._apply_categories_panel_state()
+        self.refresh_people()
 
     def toggle_source_column(self) -> None:
         self.source_column_visible = not self.source_column_visible
@@ -4764,7 +4951,10 @@ class AudioLibraryApp:
             bg=favorites_card["bg"],
             cursor="hand2",
         )
-        favorite_photo_label.pack(side="left")
+        favorite_photo_label.pack(
+            side="left" if not self.categories_collapsed else "top",
+            anchor="center" if self.categories_collapsed else "w",
+        )
         favorite_name_label = LocalizedLabel(
             favorites_card,
             text="★ Favorites",
@@ -4775,7 +4965,8 @@ class AudioLibraryApp:
             justify="left",
             cursor="hand2",
         )
-        favorite_name_label.pack(side="left", padx=12)
+        if not self.categories_collapsed:
+            favorite_name_label.pack(side="left", padx=12)
         favorite_count_label = LocalizedLabel(
             favorites_card,
             text=f"{self.store.favorite_count()}/{FAVORITES_LIMIT}",
@@ -4784,7 +4975,8 @@ class AudioLibraryApp:
             font=("Segoe UI Semibold", 11),
             cursor="hand2",
         )
-        favorite_count_label.pack(side="right", padx=(8, 4))
+        if not self.categories_collapsed:
+            favorite_count_label.pack(side="right", padx=(8, 4))
         for widget in (
             favorites_card,
             favorite_photo_label,
@@ -4814,7 +5006,10 @@ class AudioLibraryApp:
             photo = self._person_photo(person, photo_size)
             self.photo_refs.append(photo)
             photo_label = LocalizedLabel(card, image=photo, bg=card["bg"], cursor="hand2")
-            photo_label.pack(side="left")
+            photo_label.pack(
+                side="left" if not self.categories_collapsed else "top",
+                anchor="center" if self.categories_collapsed else "w",
+            )
             count_label = LocalizedLabel(
                 card,
                 text=str(track_counts.get(person.id, 0)),
@@ -4823,11 +5018,13 @@ class AudioLibraryApp:
                 font=("Segoe UI Semibold", 11),
                 cursor="hand2",
             )
-            count_label.pack(side="right", padx=(8, 4))
+            if not self.categories_collapsed:
+                count_label.pack(side="right", padx=(8, 4))
             name_label = LocalizedLabel(card, text=person.name, bg=card["bg"], fg=TEXT,
                                   font=("Segoe UI Semibold", 11), wraplength=180, justify="left",
                                   cursor="hand2")
-            name_label.pack(side="left", padx=12)
+            if not self.categories_collapsed:
+                name_label.pack(side="left", padx=12)
             for widget in (card, photo_label, name_label, count_label):
                 widget.bind("<Button-1>", lambda _, pid=person.id: self.select_person(pid))
             self._person_card_widgets[person.id] = (
@@ -5108,6 +5305,7 @@ class AudioLibraryApp:
         view_anchor = self.track_table.view_anchor()
         if self.selected_person_id is None:
             self.track_table.replace_rows([])
+            self._update_track_buttons()
             return
         self.track_table.set_title_autofit(
             self.selected_person_id == FAVORITES_PERSON_ID
@@ -5164,6 +5362,7 @@ class AudioLibraryApp:
         if selected_id and self.track_table.exists(selected_id):
             self.track_table.selection_set(selected_id)
             self.track_table.focus(selected_id)
+        self._update_track_buttons()
 
     def _update_track_headings(self) -> None:
         for column, label in self.track_heading_labels.items():
@@ -5204,7 +5403,9 @@ class AudioLibraryApp:
     def _update_track_buttons(self) -> None:
         # Selection is only a pending choice.  The currently loaded recording
         # must keep playing until the user explicitly presses "Відтворити".
-        return
+        state = "normal" if self._selected_track() is not None else "disabled"
+        self.rename_track_button.configure(state=state)
+        self.delete_track_button.configure(state=state)
 
     def _on_track_table_click(self, event: tk.Event) -> None:
         if self.track_table.identify_region(event.x, event.y) != "cell":
@@ -6431,8 +6632,8 @@ class AudioLibraryApp:
             (0, 0), window=content, anchor="nw"
         )
         settings_canvas.configure(yscrollcommand=settings_scrollbar.set)
-        settings_canvas.pack(side="left", fill="both", expand=True)
         settings_scrollbar.pack(side="right", fill="y", pady=8)
+        settings_canvas.pack(side="left", fill="both", expand=True)
         content.bind(
             "<Configure>",
             lambda _event: settings_canvas.configure(
@@ -7487,16 +7688,56 @@ class AudioLibraryApp:
         def apply_accent() -> None:
             save_setting("accent_color", accent_value.get())
             self._apply_saved_accent()
-            ttk.Style(self.root).map("Treeview", background=[("selected", ACCENT)])
-            self.play_pause_button.configure(
-                color=ACCENT,
-                hover_color=ACCENT_HOVER,
+            style = ttk.Style(self.root)
+            style.map("Treeview", background=[("selected", ACCENT)])
+            style.configure(
+                "Settings.Horizontal.TProgressbar",
+                background=ACCENT,
+                lightcolor=ACCENT,
+                darkcolor=ACCENT,
             )
-            self.progress.active_color = ACCENT
+            active_buttons: list[tk.Widget] = []
+            for button in self._accent_buttons:
+                try:
+                    if not button.winfo_exists():
+                        continue
+                    if isinstance(button, RoundedButton):
+                        button.configure(color=ACCENT, hover_color=ACCENT_HOVER)
+                    else:
+                        button.configure(
+                            bg=ACCENT,
+                            activebackground=ACCENT_HOVER,
+                        )
+                    active_buttons.append(button)
+                except tk.TclError:
+                    continue
+            self._accent_buttons = active_buttons
+            self.scrollbar_images["normal"].paste(
+                render_scrollbar_thumb_image(BORDER)
+            )
+            self.scrollbar_images["active"].paste(
+                render_scrollbar_thumb_image(ACCENT)
+            )
+            self.scrollbar_images["pressed"].paste(
+                render_scrollbar_thumb_image(ACCENT_HOVER)
+            )
+            self.scrollbar_images["horizontal_normal"].paste(
+                render_scrollbar_thumb_image(BORDER, horizontal=True)
+            )
+            self.scrollbar_images["horizontal_active"].paste(
+                render_scrollbar_thumb_image(ACCENT, horizontal=True)
+            )
+            self.scrollbar_images["horizontal_pressed"].paste(
+                render_scrollbar_thumb_image(ACCENT_HOVER, horizontal=True)
+            )
+            self.progress.fill_color = ACCENT
+            self.progress.active_color = ACCENT_HOVER
             self.progress._draw()
+            self.volume_scale.active_color = ACCENT
+            self.volume_scale._draw()
             self.refresh_people()
             self.track_table.refresh_style()
-            self.status_text.set("Колір акценту збережено; усі елементи оновляться після перезапуску")
+            self.status_text.set("Колір акценту застосовано")
 
         photo_labels = {"Малі": 72, "Середні": 92, "Великі": 108}
         photo_size_value.set(
