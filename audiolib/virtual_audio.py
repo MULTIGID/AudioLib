@@ -3,12 +3,19 @@ from __future__ import annotations
 import array
 from collections import deque
 import ctypes
+from ctypes import wintypes
 import hashlib
+import json
 import os
 import platform
 import shutil
+import subprocess
+import sys
+import tempfile
 import threading
+import time
 import urllib.request
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -20,6 +27,13 @@ try:
 except ImportError as error:  # The source-mode error is shown in the UI with an explanation.
     miniaudio = None
     _MINIAUDIO_IMPORT_ERROR = error
+
+try:
+    import sounddevice
+    _SOUNDDEVICE_IMPORT_ERROR = None
+except ImportError as error:
+    sounddevice = None
+    _SOUNDDEVICE_IMPORT_ERROR = error
 
 
 DRIVER_PAGE = "https://vb-audio.com/Cable/index.htm"
@@ -77,6 +91,87 @@ class VirtualAudioError(RuntimeError):
     pass
 
 
+def _wdmks_cable_output_device() -> int:
+    if sounddevice is None:
+        raise VirtualAudioError(
+            f"Модуль Kernel Streaming недоступний: {_SOUNDDEVICE_IMPORT_ERROR}"
+        )
+    host_apis = sounddevice.query_hostapis()
+    candidates: list[tuple[int, dict]] = []
+    for index, device in enumerate(sounddevice.query_devices()):
+        host_name = str(host_apis[device["hostapi"]]["name"])
+        name = str(device["name"])
+        if (
+            "WDM-KS" in host_name
+            and int(device["max_output_channels"]) >= 2
+            and "vb-audio point" in name.casefold()
+        ):
+            candidates.append((index, device))
+    if not candidates:
+        raise VirtualAudioError("Не знайдено вихідний WDM/KS-пін VB-CABLE")
+    return min(
+        candidates,
+        key=lambda item: (
+            not str(item[1]["name"]).casefold().startswith("output"),
+            int(item[0]),
+        ),
+    )[0]
+
+
+class _KernelStreamingPlaybackDevice:
+    """Feed the existing bridge generator directly into VB-CABLE's KS pin."""
+
+    def __init__(
+        self,
+        *,
+        sample_rate: int,
+        channels: int,
+        buffersize_msec: int,
+    ) -> None:
+        if sounddevice is None:
+            raise VirtualAudioError(
+                f"Модуль Kernel Streaming недоступний: {_SOUNDDEVICE_IMPORT_ERROR}"
+            )
+        self._generator = None
+        self._callback_error: Exception | None = None
+        blocksize = max(128, sample_rate * buffersize_msec // 1000)
+        self._stream = sounddevice.RawOutputStream(
+            device=_wdmks_cable_output_device(),
+            samplerate=sample_rate,
+            channels=channels,
+            dtype="int16",
+            blocksize=blocksize,
+            latency="low",
+            callback=self._callback,
+        )
+
+    def _callback(self, outdata, frames: int, _time_info, _status) -> None:
+        byte_count = len(outdata)
+        if self._generator is None or self._callback_error is not None:
+            outdata[:] = b"\0" * byte_count
+            return
+        try:
+            samples = self._generator.send(frames)
+            payload = samples.tobytes() if hasattr(samples, "tobytes") else bytes(samples)
+            if len(payload) < byte_count:
+                payload += b"\0" * (byte_count - len(payload))
+            outdata[:] = payload[:byte_count]
+        except Exception as error:
+            self._callback_error = error
+            outdata[:] = b"\0" * byte_count
+
+    def start(self, generator) -> None:
+        self._generator = generator
+        self._stream.start()
+
+    def close(self) -> None:
+        self._generator = None
+        try:
+            self._stream.stop()
+        finally:
+            self._stream.close()
+
+
 def driver_directory() -> Path:
     base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
     return base / "AudioLib" / "VB-CABLE"
@@ -115,7 +210,7 @@ def prepare_official_installer() -> Path:
     partial = archive.with_suffix(".download")
     request = urllib.request.Request(
         DRIVER_URL,
-        headers={"User-Agent": "AudioLib/2.8.3 (+https://vb-audio.com/Cable/index.htm)"},
+        headers={"User-Agent": "AudioLib/2.8.4 (+https://vb-audio.com/Cable/index.htm)"},
     )
     try:
         with urllib.request.urlopen(request, timeout=30) as response, partial.open("wb") as output:
@@ -162,7 +257,9 @@ def launch_driver_setup(setup: Path) -> None:
 class VirtualMicrophoneBridge:
     """Mix the default physical microphone and a selected sound into VB-CABLE."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, mix_microphone: bool = True) -> None:
+        self._mix_microphone = bool(mix_microphone)
+        self._kernel_streaming_cable = False
         self._inventory = None
         self._capture_device = None
         self._capture_generator = None
@@ -207,12 +304,26 @@ class VirtualMicrophoneBridge:
         latency_profile: str = "balanced",
         local_monitoring: bool = True,
         monitor_output_name: str = "",
+        kernel_streaming_cable: bool | None = None,
+        mix_microphone: bool | None = None,
     ) -> None:
         profile = latency_profile if latency_profile in LATENCY_PROFILES else "balanced"
+        requested_kernel_streaming = (
+            self._kernel_streaming_cable
+            if kernel_streaming_cable is None
+            else bool(kernel_streaming_cable)
+        )
+        requested_mix_microphone = (
+            self._mix_microphone
+            if mix_microphone is None
+            else bool(mix_microphone)
+        )
         restart_required = (
             profile != self._latency_profile
             or bool(local_monitoring) != self._local_monitoring
             or monitor_output_name.strip() != self._monitor_output_name
+            or requested_kernel_streaming != self._kernel_streaming_cable
+            or requested_mix_microphone != self._mix_microphone
         )
         was_running = self.is_running()
         if restart_required and was_running:
@@ -220,8 +331,14 @@ class VirtualMicrophoneBridge:
         self._latency_profile = profile
         self._local_monitoring = bool(local_monitoring)
         self._monitor_output_name = monitor_output_name.strip()
+        self._kernel_streaming_cable = requested_kernel_streaming
+        self._mix_microphone = requested_mix_microphone
         capacity = LATENCY_PROFILES[profile]["capacity"]
         self._microphone_buffer = deque(maxlen=SAMPLE_RATE * capacity // 1000)
+
+    @property
+    def uses_kernel_streaming(self) -> bool:
+        return self._kernel_streaming_cable
 
     def device_status(self) -> tuple[bool, str]:
         if miniaudio is None:
@@ -313,30 +430,38 @@ class VirtualMicrophoneBridge:
             # USB/C-Media devices then periodically repeat or lose samples.
             # Decouple both sides with a bounded ring buffer instead.
             profile = LATENCY_PROFILES[self._latency_profile]
-            self._capture_device = miniaudio.CaptureDevice(
-                input_format=miniaudio.SampleFormat.SIGNED16,
-                nchannels=self.capture_channels,
-                sample_rate=self.sample_rate,
-                buffersize_msec=profile["bridge"],
-                device_id=physical_mic["id"],
-                app_name="AudioLib Virtual Microphone",
-            )
-            # VB-CABLE can accept an exclusive WASAPI stream but silently stop
-            # forwarding it to CABLE Output on some driver/headset combinations.
-            # Shared mode is the driver's normal path and reliably carries both
-            # the physical microphone and AudioLib recordings.
-            self.screen_capture_protected = False
-            self.screen_capture_protection_error = (
-                "Використовується сумісний спільний режим VB-CABLE"
-            )
-            self._cable_device = miniaudio.PlaybackDevice(
-                output_format=miniaudio.SampleFormat.SIGNED16,
-                nchannels=2,
-                sample_rate=self.sample_rate,
-                buffersize_msec=profile["bridge"],
-                device_id=cable["id"],
-                app_name="AudioLib Virtual Microphone",
-            )
+            if self._mix_microphone:
+                self._capture_device = miniaudio.CaptureDevice(
+                    input_format=miniaudio.SampleFormat.SIGNED16,
+                    nchannels=self.capture_channels,
+                    sample_rate=self.sample_rate,
+                    buffersize_msec=profile["bridge"],
+                    device_id=physical_mic["id"],
+                    app_name="AudioLib Physical Microphone Relay",
+                )
+            if self._kernel_streaming_cable:
+                self._cable_device = _KernelStreamingPlaybackDevice(
+                    sample_rate=self.sample_rate,
+                    channels=2,
+                    buffersize_msec=profile["bridge"],
+                )
+                self.playback_name = "VB-CABLE WDM/KS"
+                self.screen_capture_protected = True
+                self.screen_capture_protection_error = ""
+            else:
+                # Shared mode remains available as a compatibility fallback.
+                self.screen_capture_protected = False
+                self.screen_capture_protection_error = (
+                    "Використовується сумісний спільний режим VB-CABLE"
+                )
+                self._cable_device = miniaudio.PlaybackDevice(
+                    output_format=miniaudio.SampleFormat.SIGNED16,
+                    nchannels=2,
+                    sample_rate=self.sample_rate,
+                    buffersize_msec=profile["bridge"],
+                    device_id=cable["id"],
+                    app_name="AudioLib Virtual Microphone",
+                )
             if self._local_monitoring:
                 # Local monitoring must never use CABLE Input.  Passing no
                 # device ID here used to mean "Windows default"; if VB-CABLE
@@ -357,14 +482,16 @@ class VirtualMicrophoneBridge:
                         device_id=monitor.get("id"),
                         app_name="AudioLib Microphone Monitor",
                     )
-            self._capture_generator = self._capture_microphone()
-            next(self._capture_generator)
+            if self._capture_device is not None:
+                self._capture_generator = self._capture_microphone()
+                next(self._capture_generator)
             self._cable_generator = self._cable_output()
             next(self._cable_generator)
             if self._monitor_device is not None:
                 self._monitor_generator = self._monitor()
                 next(self._monitor_generator)
-            self._capture_device.start(self._capture_generator)
+            if self._capture_device is not None and self._capture_generator is not None:
+                self._capture_device.start(self._capture_generator)
             self._cable_device.start(self._cable_generator)
             if self._monitor_device is not None and self._monitor_generator is not None:
                 self._monitor_device.start(self._monitor_generator)
@@ -429,7 +556,7 @@ class VirtualMicrophoneBridge:
                 track = self._track
                 paused = self._track_paused
                 for frame in range(required_frames):
-                    if self._microphone_buffer_ready:
+                    if self._mix_microphone and self._microphone_buffer_ready:
                         mic_sample = self._microphone_buffer.popleft()
                     else:
                         mic_sample = 0
@@ -572,4 +699,379 @@ class VirtualMicrophoneBridge:
             self._microphone_buffer.clear()
             self._microphone_buffer_ready = False
         self._inventory = None
+
+
+def _write_relay_result(path: Path, payload: dict[str, object]) -> None:
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+class _WindowsIsolatedProcess:
+    """Small process-handle wrapper compatible with the Popen methods we use."""
+
+    def __init__(self, handle: int, pid: int, command: list[str]) -> None:
+        self._handle = handle
+        self.pid = pid
+        self.args = command
+
+    def poll(self) -> int | None:
+        if not self._handle:
+            return 0
+        exit_code = wintypes.DWORD()
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        if not kernel32.GetExitCodeProcess(self._handle, ctypes.byref(exit_code)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return None if exit_code.value == 259 else int(exit_code.value)
+
+    def wait(self, timeout: float | None = None) -> int:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        milliseconds = 0xFFFFFFFF if timeout is None else max(0, int(timeout * 1000))
+        result = kernel32.WaitForSingleObject(self._handle, milliseconds)
+        if result == 0x00000102:
+            raise subprocess.TimeoutExpired(self.args, timeout)
+        if result != 0:
+            raise ctypes.WinError(ctypes.get_last_error())
+        return int(self.poll() or 0)
+
+    def terminate(self) -> None:
+        if not self._handle:
+            return
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        kernel32.TerminateProcess.restype = wintypes.BOOL
+        if not kernel32.TerminateProcess(self._handle, 1):
+            error = ctypes.get_last_error()
+            if error != 5 or self.poll() is None:
+                raise ctypes.WinError(error)
+
+    kill = terminate
+
+    def close(self) -> None:
+        if not self._handle:
+            return
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.CloseHandle(self._handle)
+        self._handle = 0
+
+
+class _STARTUPINFOW(ctypes.Structure):
+    _fields_ = [
+        ("cb", wintypes.DWORD),
+        ("lpReserved", wintypes.LPWSTR),
+        ("lpDesktop", wintypes.LPWSTR),
+        ("lpTitle", wintypes.LPWSTR),
+        ("dwX", wintypes.DWORD),
+        ("dwY", wintypes.DWORD),
+        ("dwXSize", wintypes.DWORD),
+        ("dwYSize", wintypes.DWORD),
+        ("dwXCountChars", wintypes.DWORD),
+        ("dwYCountChars", wintypes.DWORD),
+        ("dwFillAttribute", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("wShowWindow", wintypes.WORD),
+        ("cbReserved2", wintypes.WORD),
+        ("lpReserved2", ctypes.POINTER(wintypes.BYTE)),
+        ("hStdInput", wintypes.HANDLE),
+        ("hStdOutput", wintypes.HANDLE),
+        ("hStdError", wintypes.HANDLE),
+    ]
+
+
+class _STARTUPINFOEXW(ctypes.Structure):
+    _fields_ = [
+        ("StartupInfo", _STARTUPINFOW),
+        ("lpAttributeList", wintypes.LPVOID),
+    ]
+
+
+class _PROCESS_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("hProcess", wintypes.HANDLE),
+        ("hThread", wintypes.HANDLE),
+        ("dwProcessId", wintypes.DWORD),
+        ("dwThreadId", wintypes.DWORD),
+    ]
+
+
+def _spawn_outside_current_process_tree(
+    command: list[str],
+    cwd: Path,
+) -> _WindowsIsolatedProcess:
+    """Create a helper whose logical parent is Explorer, not AudioLib.
+
+    Discord's application audio capture includes the selected process tree. A
+    normal Popen child therefore remains audible in the screen share even when
+    its audio is separated into another process.
+    """
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    user32.GetShellWindow.restype = wintypes.HWND
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    shell_window = user32.GetShellWindow()
+    shell_pid = wintypes.DWORD()
+    if not shell_window or not user32.GetWindowThreadProcessId(shell_window, ctypes.byref(shell_pid)):
+        raise VirtualAudioError("Не вдалося знайти процес оболонки Windows для ізоляції мікрофона")
+
+    process_create_process = 0x0080
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    shell_handle = kernel32.OpenProcess(process_create_process, False, shell_pid.value)
+    if not shell_handle:
+        raise VirtualAudioError(
+            f"Не вдалося відкрити оболонку Windows для ізоляції мікрофона: {ctypes.WinError(ctypes.get_last_error())}"
+        )
+
+    attribute_list = None
+    attribute_list_initialized = False
+    process_info = _PROCESS_INFORMATION()
+    try:
+        size = ctypes.c_size_t()
+        kernel32.InitializeProcThreadAttributeList.argtypes = [
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        kernel32.InitializeProcThreadAttributeList.restype = wintypes.BOOL
+        kernel32.InitializeProcThreadAttributeList(None, 1, 0, ctypes.byref(size))
+        attribute_list = ctypes.create_string_buffer(size.value)
+        attribute_pointer = ctypes.cast(attribute_list, wintypes.LPVOID)
+        if not kernel32.InitializeProcThreadAttributeList(
+            attribute_pointer, 1, 0, ctypes.byref(size)
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        attribute_list_initialized = True
+
+        kernel32.UpdateProcThreadAttribute.argtypes = [
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            ctypes.c_size_t,
+            wintypes.LPVOID,
+            ctypes.c_size_t,
+            wintypes.LPVOID,
+            wintypes.LPVOID,
+        ]
+        kernel32.UpdateProcThreadAttribute.restype = wintypes.BOOL
+        parent_value = wintypes.HANDLE(shell_handle)
+        if not kernel32.UpdateProcThreadAttribute(
+            attribute_pointer,
+            0,
+            0x00020000,
+            ctypes.byref(parent_value),
+            ctypes.sizeof(parent_value),
+            None,
+            None,
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        startup = _STARTUPINFOEXW()
+        startup.StartupInfo.cb = ctypes.sizeof(startup)
+        startup.lpAttributeList = attribute_pointer
+        command_line = ctypes.create_unicode_buffer(subprocess.list2cmdline(command))
+        kernel32.CreateProcessW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.LPWSTR,
+            wintypes.LPVOID,
+            wintypes.LPVOID,
+            wintypes.BOOL,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.LPCWSTR,
+            ctypes.POINTER(_STARTUPINFOW),
+            ctypes.POINTER(_PROCESS_INFORMATION),
+        ]
+        kernel32.CreateProcessW.restype = wintypes.BOOL
+        creation_flags = 0x00080000 | 0x08000000
+        if not kernel32.CreateProcessW(
+            command[0],
+            command_line,
+            None,
+            None,
+            False,
+            creation_flags,
+            None,
+            str(cwd),
+            ctypes.byref(startup.StartupInfo),
+            ctypes.byref(process_info),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        kernel32.CloseHandle(process_info.hThread)
+        return _WindowsIsolatedProcess(
+            process_info.hProcess,
+            int(process_info.dwProcessId),
+            command,
+        )
+    finally:
+        if attribute_list is not None and attribute_list_initialized:
+            kernel32.DeleteProcThreadAttributeList.argtypes = [wintypes.LPVOID]
+            kernel32.DeleteProcThreadAttributeList.restype = None
+            kernel32.DeleteProcThreadAttributeList(ctypes.cast(attribute_list, wintypes.LPVOID))
+        kernel32.CloseHandle(shell_handle)
+
+
+def run_microphone_relay_worker(
+    control_dir: Path,
+    parent_pid: int,
+    preferred_capture_name: str,
+    preferred_capture_description: str,
+) -> int:
+    """Relay only the physical microphone in a process separate from the UI."""
+    control_dir.mkdir(parents=True, exist_ok=True)
+    ready_path = control_dir / "ready.json"
+    stop_path = control_dir / "stop"
+    bridge = VirtualMicrophoneBridge(mix_microphone=True)
+    bridge.configure(local_monitoring=False)
+    parent_handle = None
+    kernel32 = None
+    try:
+        if sys.platform == "win32":
+            synchronize = 0x00100000
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.OpenProcess.argtypes = [
+                ctypes.c_uint32,
+                ctypes.c_bool,
+                ctypes.c_uint32,
+            ]
+            kernel32.OpenProcess.restype = ctypes.c_void_p
+            kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+            kernel32.WaitForSingleObject.restype = ctypes.c_uint32
+            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel32.CloseHandle.restype = ctypes.c_bool
+            parent_handle = kernel32.OpenProcess(
+                synchronize,
+                False,
+                int(parent_pid),
+            )
+            if not parent_handle:
+                raise VirtualAudioError("Не вдалося відкрити процес AudioLib")
+        bridge.start(preferred_capture_name, preferred_capture_description)
+        _write_relay_result(ready_path, {"ok": True})
+        while not stop_path.exists():
+            if parent_handle is not None and kernel32 is not None:
+                wait_result = kernel32.WaitForSingleObject(
+                    parent_handle,
+                    100,
+                )
+                if wait_result == 0:
+                    break
+            else:
+                time.sleep(0.1)
+        return 0
+    except Exception as error:
+        try:
+            _write_relay_result(ready_path, {"ok": False, "error": str(error)})
+        except OSError:
+            pass
+        return 1
+    finally:
+        bridge.close()
+        if parent_handle is not None and kernel32 is not None:
+            kernel32.CloseHandle(parent_handle)
+
+
+class MicrophoneRelayProcess:
+    """Own a microphone-only helper so screen capture cannot tap the UI stream."""
+
+    def __init__(self, root_dir: Path) -> None:
+        self.root_dir = root_dir
+        self.process: subprocess.Popen | _WindowsIsolatedProcess | None = None
+        self.control_dir: Path | None = None
+
+    def is_running(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def start(
+        self,
+        preferred_capture_name: str,
+        preferred_capture_description: str,
+        timeout: float = 8.0,
+    ) -> None:
+        self.stop()
+        relay_root = Path(tempfile.gettempdir()) / "AudioLibRelay"
+        relay_root.mkdir(parents=True, exist_ok=True)
+        self.control_dir = relay_root / uuid.uuid4().hex
+        self.control_dir.mkdir(parents=True, exist_ok=False)
+        if getattr(sys, "frozen", False):
+            command = [sys.executable]
+        else:
+            command = [sys.executable, str(self.root_dir / "main.py")]
+        command.extend(
+            [
+                "--microphone-relay",
+                "--relay-control",
+                str(self.control_dir),
+                "--relay-parent",
+                str(os.getpid()),
+                "--relay-name",
+                preferred_capture_name,
+                "--relay-description",
+                preferred_capture_description,
+            ]
+        )
+        try:
+            if sys.platform == "win32":
+                self.process = _spawn_outside_current_process_tree(
+                    command,
+                    self.root_dir,
+                )
+            else:
+                self.process = subprocess.Popen(
+                    command,
+                    cwd=self.root_dir,
+                    close_fds=True,
+                )
+            ready_path = self.control_dir / "ready.json"
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if ready_path.exists():
+                    payload = json.loads(ready_path.read_text(encoding="utf-8"))
+                    if payload.get("ok") is True:
+                        return
+                    raise VirtualAudioError(
+                        str(payload.get("error") or "Не вдалося запустити реле мікрофона")
+                    )
+                if self.process.poll() is not None:
+                    raise VirtualAudioError("Процес реле мікрофона передчасно завершився")
+                time.sleep(0.05)
+            raise VirtualAudioError("Реле фізичного мікрофона не відповіло вчасно")
+        except Exception:
+            self.stop()
+            raise
+
+    def stop(self) -> None:
+        process = self.process
+        control_dir = self.control_dir
+        if control_dir is not None:
+            try:
+                (control_dir / "stop").touch()
+            except OSError:
+                pass
+        if process is not None and process.poll() is None:
+            try:
+                process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                try:
+                    process.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+        if isinstance(process, _WindowsIsolatedProcess):
+            process.close()
+        self.process = None
+        self.control_dir = None
+        if control_dir is not None:
+            shutil.rmtree(control_dir, ignore_errors=True)
 

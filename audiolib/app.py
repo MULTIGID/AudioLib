@@ -50,6 +50,7 @@ from .storage import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, LibraryStore, Person, T
 from .updates import GitHubUpdateManager, ReleaseInfo, UpdateError
 from .virtual_audio import (
     DRIVER_PAGE,
+    MicrophoneRelayProcess,
     VirtualAudioError,
     VirtualMicrophoneBridge,
     launch_driver_setup,
@@ -2031,7 +2032,16 @@ class AudioLibraryApp:
         self.store = LibraryStore(root_dir)
         report_startup(45, "Підготовка аудіосистеми…", "Preparing audio system…")
         self.player = WindowsMediaPlayer()
-        self.virtual_microphone = VirtualMicrophoneBridge()
+        kernel_streaming_cable = bool(
+            self.app_settings["kernel_streaming_cable"]
+        )
+        # Shared mode keeps the physical voice in an isolated helper process.
+        # Kernel Streaming owns the cable pin directly, so the main bridge
+        # mixes the microphone and recordings into its single KS stream.
+        self.virtual_microphone = VirtualMicrophoneBridge(
+            mix_microphone=kernel_streaming_cable
+        )
+        self.microphone_relay = MicrophoneRelayProcess(root_dir)
         self.player.set_normalization_enabled(
             bool(self.app_settings["normalize_loudness"])
         )
@@ -2043,6 +2053,8 @@ class AudioLibraryApp:
             latency_profile=str(self.app_settings["latency_profile"]),
             local_monitoring=bool(self.app_settings["local_monitoring"]),
             monitor_output_name=str(self.app_settings["output_device"]),
+            kernel_streaming_cable=kernel_streaming_cable,
+            mix_microphone=kernel_streaming_cable,
         )
         self.microphone_routing = WindowsMicrophoneRouting(root_dir)
         self._audio_shutdown_done = False
@@ -2210,6 +2222,7 @@ class AudioLibraryApp:
             "output_device": "",
             "normalize_loudness": True,
             "local_monitoring": True,
+            "kernel_streaming_cable": True,
             "latency_profile": "balanced",
             "accent_color": "Фіолетовий",
             "photo_size": 92,
@@ -2223,6 +2236,15 @@ class AudioLibraryApp:
                 defaults.update(
                     {key: payload[key] for key in defaults.keys() if key in payload}
                 )
+                # The first experimental build used WASAPI Exclusive. Preserve
+                # the user's enabled protection choice while migrating it to
+                # the working direct Kernel Streaming implementation.
+                if (
+                    "kernel_streaming_cable" not in payload
+                    and payload.get("exclusive_cable") is True
+                ):
+                    defaults["kernel_streaming_cable"] = True
+                    defaults["local_monitoring"] = True
         except (FileNotFoundError, OSError, ValueError, TypeError, AttributeError):
             pass
         try:
@@ -2235,6 +2257,7 @@ class AudioLibraryApp:
             ("auto_virtual_microphone", False),
             ("normalize_loudness", True),
             ("local_monitoring", True),
+            ("kernel_streaming_cable", True),
             ("check_updates_on_startup", True),
         ):
             if not isinstance(defaults[key], bool):
@@ -3398,6 +3421,7 @@ class AudioLibraryApp:
                 if reset_existing:
                     restored = self.microphone_routing.restore_default_microphone()
                     self.virtual_microphone.close()
+                    self.microphone_relay.stop()
                     if restored:
                         self.microphone_routing.disable_cable_output()
                 selected = self.microphone_routing.activate_for_app(
@@ -3410,16 +3434,28 @@ class AudioLibraryApp:
                     selected.friendly_name,
                     selected.description,
                 )
+                if self.virtual_microphone.uses_kernel_streaming:
+                    # The direct KS pin is owned by the main bridge, which
+                    # already mixes the physical microphone into that stream.
+                    self.microphone_relay.stop()
+                else:
+                    self.microphone_relay.start(
+                        selected.friendly_name,
+                        selected.description,
+                    )
                 if self._closing_event.is_set():
+                    self.microphone_relay.stop()
                     self.virtual_microphone.close()
                     self.microphone_routing.restore_after_failed_start()
                     return
                 self._write_audio_routing_log(
                     f"START selected={microphone_label(selected)} cable_default=true "
-                    f"screen_capture_protected={self.virtual_microphone.screen_capture_protected}"
+                    f"screen_capture_protected={self.virtual_microphone.screen_capture_protected} "
+                    f"mode={'kernel-streaming' if self.virtual_microphone.uses_kernel_streaming else 'shared'}"
                 )
                 self._virtual_start_results.put((selected, None))
             except Exception as error:
+                self.microphone_relay.stop()
                 self.virtual_microphone.close()
                 self.microphone_routing.restore_after_failed_start()
                 self._write_audio_routing_log(f"START_ERROR {error}")
@@ -3441,9 +3477,16 @@ class AudioLibraryApp:
                 self._virtual_start_callback = None
                 if error_text:
                     self.status_text.set(str(error_text))
+                elif self.microphone_relay.is_running():
+                    self._write_audio_routing_log(
+                        "MICROPHONE_RELAY_ISOLATED process=true"
+                    )
+                    self.status_text.set(
+                        "Віртуальний мікрофон працює; голос ізольовано від демонстрації"
+                    )
                 elif self.virtual_microphone.screen_capture_protected:
                     self.status_text.set(
-                        "Віртуальний мікрофон працює; звук виключено із захоплення демонстрації"
+                        "Віртуальний мікрофон працює через Kernel Streaming"
                     )
                 else:
                     self._write_audio_routing_log(
@@ -6158,6 +6201,9 @@ class AudioLibraryApp:
         local_monitoring_value = tk.BooleanVar(
             value=bool(self.app_settings["local_monitoring"])
         )
+        kernel_streaming_value = tk.BooleanVar(
+            value=bool(self.app_settings["kernel_streaming_cable"])
+        )
         normalize_loudness_value = tk.BooleanVar(
             value=bool(self.app_settings["normalize_loudness"])
         )
@@ -6673,6 +6719,39 @@ class AudioLibraryApp:
         latency_box.configure(values=latency_options)
         latency_box.current(latency_options.index(latency_value.get()))
         latency_box.pack(side="left", fill="x", expand=True)
+
+        kernel_streaming_panel = tk.Frame(content, bg=PANEL, padx=14, pady=5)
+        kernel_streaming_panel.pack(fill="x", padx=22, pady=(5, 2))
+
+        def apply_kernel_streaming() -> None:
+            enabled = kernel_streaming_value.get()
+            save_setting("kernel_streaming_cable", enabled)
+            bridge_was_running = self.virtual_microphone.is_running()
+            self.virtual_microphone.configure(
+                latency_profile=str(self.app_settings["latency_profile"]),
+                local_monitoring=bool(self.app_settings["local_monitoring"]),
+                monitor_output_name=str(self.app_settings["output_device"]),
+                kernel_streaming_cable=enabled,
+                mix_microphone=enabled,
+            )
+            if bridge_was_running:
+                self._begin_virtual_microphone_start(reset_existing=True)
+            self.status_text.set(
+                "Експериментальний Kernel Streaming увімкнено"
+                if enabled
+                else "Сумісний режим VB-CABLE увімкнено"
+            )
+
+        switch_row(
+            kernel_streaming_panel,
+            "Захист демонстрації (експериментально)",
+            "Передає звук безпосередньо у WDM/KS-пін VB-CABLE, минаючи "
+            "системний аудіомікшер Windows. Це має виключити мікрофонний мікс "
+            "із захоплення системного звуку. Локальне прослуховування можна "
+            "ввімкнути окремо в розділі відтворення.",
+            kernel_streaming_value,
+            apply_kernel_streaming,
+        )
         LocalizedLabel(
             content,
             text=(
@@ -7023,6 +7102,12 @@ class AudioLibraryApp:
                     latency_profile=str(self.app_settings["latency_profile"]),
                     local_monitoring=bool(self.app_settings["local_monitoring"]),
                     monitor_output_name=str(self.app_settings["output_device"]),
+                    kernel_streaming_cable=bool(
+                        self.app_settings["kernel_streaming_cable"]
+                    ),
+                    mix_microphone=bool(
+                        self.app_settings["kernel_streaming_cable"]
+                    ),
                 )
                 # The database and image files were replaced underneath the
                 # current widgets.  Drop every view/cache tied to the old
@@ -7438,6 +7523,10 @@ class AudioLibraryApp:
             restored = self.microphone_routing.restore_default_microphone()
         except Exception as error:
             error_text = f" restore_error={error}"
+        try:
+            self.microphone_relay.stop()
+        except Exception as error:
+            error_text += f" relay_error={error}"
         try:
             self.virtual_microphone.close()
         except Exception as error:

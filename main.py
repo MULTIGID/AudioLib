@@ -17,7 +17,7 @@ from audiolib.startup import (
 
 ERROR_ALREADY_EXISTS = 183
 WAIT_OBJECT_0 = 0
-INSTANCE_EVENT_NAME = "Local\\MULTIGID.AudioLib.2.8.3.ShowWindow"
+INSTANCE_EVENT_NAME = "Local\\MULTIGID.AudioLib.2.8.4.ShowWindow"
 
 
 def _application_root() -> Path:
@@ -119,8 +119,31 @@ def _create_instance_event(show_existing: bool):
     return handle, kernel32, False
 
 
+def _argument_value(name: str) -> str:
+    try:
+        index = sys.argv.index(name)
+        return sys.argv[index + 1]
+    except (ValueError, IndexError):
+        return ""
+
+
 if __name__ == "__main__":
     application_root = _application_root()
+    if "--microphone-relay" in sys.argv[1:]:
+        from audiolib.virtual_audio import run_microphone_relay_worker
+
+        control_value = _argument_value("--relay-control")
+        parent_value = _argument_value("--relay-parent")
+        if not control_value or not parent_value.isdigit():
+            raise SystemExit(2)
+        raise SystemExit(
+            run_microphone_relay_worker(
+                Path(control_value),
+                int(parent_value),
+                _argument_value("--relay-name"),
+                _argument_value("--relay-description"),
+            )
+        )
     if "--check-update" in sys.argv[1:]:
         from audiolib import __version__
         from audiolib.updates import GitHubUpdateManager
