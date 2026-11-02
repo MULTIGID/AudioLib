@@ -535,7 +535,7 @@ try {
             $message = "{0} UPDATE_START_CONFIRMATION_TIMEOUT" -f (Get-Date -Format s)
             New-Item -ItemType Directory -Path (Split-Path $logPath) -Force | Out-Null
             Add-Content -LiteralPath $logPath -Value $message -Encoding UTF8
-            break
+            throw (LocalText "Нова версія AudioLib не підтвердила успішний запуск. Виконується повернення до попередньої версії." "The new AudioLib version did not confirm a successful startup. Rolling back to the previous version.")
         }
         Refresh-Window
         Start-Sleep -Milliseconds 80
@@ -551,6 +551,10 @@ catch {
     $message = "{0} UPDATE_FAILED {1}" -f (Get-Date -Format s), $_.Exception.Message
     New-Item -ItemType Directory -Path (Split-Path $logPath) -Force | Out-Null
     Add-Content -LiteralPath $logPath -Value $message -Encoding UTF8
+    if ($null -ne $startedProcess -and -not $startedProcess.HasExited) {
+        Stop-Process -Id $startedProcess.Id -Force -ErrorAction SilentlyContinue
+        $startedProcess.WaitForExit(5000) | Out-Null
+    }
     if ($newExeInstalled) {
         Remove-Item -LiteralPath $oldExe -Force -ErrorAction SilentlyContinue
     }

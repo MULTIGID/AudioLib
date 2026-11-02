@@ -62,6 +62,24 @@ from .windows_file_dialog import FileDialogError, choose_files, choose_folder
 BG = "#111827"
 PANEL = "#1f2937"
 CARD = "#273449"
+FIELD = "#374151"
+HOVER = "#334155"
+BORDER = "#64748b"
+SECONDARY = "#475569"
+PLAYER_BG = "#0b1220"
+TITLE_BG = "#0b1220"
+TITLE_HOVER = "#253247"
+PLACEHOLDER = "#94a3b8"
+TITLE_TEXT = "#dbe4f0"
+FAVORITES_BG = "#854d0e"
+FAVORITES_TEXT = "#f8fafc"
+FAVORITES_MUTED = "#9ca3af"
+WARNING_BG = "#422006"
+WARNING_TEXT = "#fde68a"
+SWITCH_OFF = "#475569"
+SWITCH_DISABLED = "#273449"
+SWITCH_THUMB = "#f8fafc"
+TRAY_STOP_COLOR = (248, 250, 252, 255)
 ACCENT = "#8b5cf6"
 ACCENT_HOVER = "#7c3aed"
 ACCENT_PRESETS = {
@@ -297,9 +315,9 @@ class FlatScale(tk.Canvas):
         command=None,
         width: int = 100,
         height: int = 18,
-        background: str = "#0b1220",
-        trough_color: str = "#374151",
-        fill_color: str = "#64748b",
+        background: str = PLAYER_BG,
+        trough_color: str = FIELD,
+        fill_color: str = BORDER,
         active_color: str = ACCENT,
         thumb_radius: int = 4,
     ) -> None:
@@ -490,7 +508,7 @@ class RoundedButton(tk.Canvas):
 
     def _background_color(self) -> str:
         if self.state == "disabled":
-            return "#374151"
+            return FIELD
         if self.hovered or self.pressed:
             return self.hover_color
         return self.normal_color
@@ -500,7 +518,9 @@ class RoundedButton(tk.Canvas):
         width = max(1, self.winfo_width(), int(self.cget("width")))
         height = max(1, self.winfo_height(), int(self.cget("height")))
         color = self._background_color()
-        symbol_color = "#94a3b8" if self.state == "disabled" else "white"
+        # Application buttons use dark accent surfaces in both themes, so
+        # their active label/icon must stay white for reliable contrast.
+        symbol_color = PLACEHOLDER if self.state == "disabled" else "#ffffff"
         if self.button_image is None and self.text in {"▶", "■", "Ⅱ", "‖"}:
             diameter = min(width, height)
             self._media_button_image = render_media_control_image(
@@ -684,7 +704,7 @@ class SmoothRadioButton(tk.Canvas):
         image = Image.new("RGBA", (size * scale, size * scale), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
         selected = self.variable.get() == self.value
-        ring = ACCENT if selected else TEXT if self.hovered else "#64748b"
+        ring = ACCENT if selected else TEXT if self.hovered else BORDER
         stroke = 2 * scale
         inset = stroke / 2
         draw.ellipse(
@@ -770,10 +790,14 @@ class ToggleSwitch(tk.Canvas):
         active = self.variable.get()
         track_color = (
             ACCENT if active and self.enabled
-            else "#475569" if self.enabled
-            else "#273449"
+            else SWITCH_OFF if self.enabled
+            else SWITCH_DISABLED
         )
-        thumb_color = "#f8fafc" if self.enabled else "#64748b"
+        thumb_color = (
+            "#ffffff" if active and self.enabled
+            else SWITCH_THUMB if self.enabled
+            else BORDER
+        )
         radius = height / 2
         thumb_radius = max(3, radius - 3)
         center_x = width - radius if active else radius
@@ -880,11 +904,11 @@ class RoundedDropdown(tk.Canvas):
         self.delete("all")
         width = max(1, self.winfo_width(), int(self.cget("width")))
         height = max(1, self.winfo_height(), int(self.cget("height")))
-        outline = ACCENT if self.hovered or self.popup is not None else "#64748b"
+        outline = ACCENT if self.hovered or self.popup is not None else BORDER
         self._surface_image = self._rounded_surface(
             width,
             height,
-            fill="#334155",
+            fill=FIELD,
             outline=outline,
         )
         self.create_image(0, 0, image=self._surface_image, anchor="nw")
@@ -971,7 +995,7 @@ class RoundedDropdown(tk.Canvas):
         owner = self.winfo_toplevel()
         popup.transient(owner)
         popup.overrideredirect(True)
-        popup.configure(bg="#111827")
+        popup.configure(bg=BG)
         self.popup = popup
         self._popup_size = (width, height)
         RoundedDropdown._active_dropdown = self
@@ -980,7 +1004,7 @@ class RoundedDropdown(tk.Canvas):
             popup,
             width=width,
             height=height,
-            bg="#111827",
+            bg=BG,
             highlightthickness=0,
             bd=0,
         )
@@ -989,7 +1013,7 @@ class RoundedDropdown(tk.Canvas):
             width,
             height,
             fill=PANEL,
-            outline="#64748b",
+            outline=BORDER,
         )
         surface.create_image(
             0,
@@ -1030,8 +1054,8 @@ class RoundedDropdown(tk.Canvas):
             row = rows[index]
             row.delete("all")
             selected = index == self.selected_index
-            fill = ACCENT if selected else ("#334155" if hovered else CARD)
-            outline = ACCENT_HOVER if selected else ("#64748b" if hovered else None)
+            fill = ACCENT if selected else (HOVER if hovered else CARD)
+            outline = ACCENT_HOVER if selected else (BORDER if hovered else None)
             row._audiolib_surface_image = self._rounded_surface(
                 content_width,
                 row_height,
@@ -1236,6 +1260,7 @@ class CustomTrackTable(tk.Frame):
         self._redraw_job: str | None = None
         self._pending_y_fraction: float | None = None
         self._autofit_title = False
+        self._view_mode = "table"
         self._row_font = tkfont.Font(root=self, font=("Segoe UI", 10))
         self._header_font = tkfont.Font(root=self, font=("Segoe UI Semibold", 9))
         self._hotkey_font = tkfont.Font(root=self, font=("Segoe UI Semibold", 8))
@@ -1280,6 +1305,41 @@ class CustomTrackTable(tk.Frame):
         )
         self.header.bind("<ButtonRelease-1>", self._on_heading_click, add="+")
         self._update_geometry()
+
+    def set_view_mode(self, mode: str) -> None:
+        mode = mode if mode in {"table", "tiles"} else "table"
+        if mode == self._view_mode:
+            return
+        anchor = self.view_anchor()
+        self._view_mode = mode
+        if mode == "tiles":
+            self.header.pack_forget()
+            self.body.configure(yscrollincrement=182)
+            self.body.xview_moveto(0.0)
+        else:
+            if not self.header.winfo_manager():
+                self.header.pack(fill="x", before=self.body)
+            self.body.configure(yscrollincrement=self._row_height())
+        self._update_geometry()
+        self.restore_view_anchor(anchor)
+
+    def _row_height(self) -> int:
+        return self.ROW_HEIGHT
+
+    def _tile_metrics(self) -> tuple[int, int, int, int]:
+        viewport = max(280, self.body.winfo_width())
+        gap = 8
+        columns = max(1, min(6, viewport // 170))
+        width = max(135, (viewport - gap * (columns + 1)) // columns)
+        return columns, width, 174, gap
+
+    def _item_geometry(self, index: int) -> tuple[int, int, int, int]:
+        if self._view_mode != "tiles":
+            height = self._row_height()
+            return 0, index * height, max(1, self.body.winfo_width()), height
+        columns, width, height, gap = self._tile_metrics()
+        row, column = divmod(index, columns)
+        return gap + column * (width + gap), gap + row * (height + gap), width, height
 
     def column(self, name: str, **kwargs) -> None:
         if name not in self._column_options:
@@ -1378,9 +1438,15 @@ class CustomTrackTable(tk.Frame):
         if not self._rows:
             return None, 0.0, fraction
         top = max(0.0, self.body.canvasy(0))
-        index = max(0, min(len(self._rows) - 1, int(top // self.ROW_HEIGHT)))
+        if self._view_mode == "tiles":
+            columns, _width, height, gap = self._tile_metrics()
+            index = int(top // (height + gap)) * columns
+        else:
+            index = int(top // self._row_height())
+        index = max(0, min(len(self._rows) - 1, index))
         iid = self._rows[index][0]
-        offset = top - index * self.ROW_HEIGHT
+        _x, item_top, _width, _height = self._item_geometry(index)
+        offset = top - item_top
         return iid, offset, fraction
 
     def restore_view_anchor(self, anchor: tuple[str | None, float, float]) -> None:
@@ -1393,8 +1459,9 @@ class CustomTrackTable(tk.Frame):
         if index is None:
             self.body.yview_moveto(max(0.0, min(1.0, fallback_fraction)))
         else:
-            total_height = max(1, len(self._rows) * self.ROW_HEIGHT)
-            target = max(0.0, index * self.ROW_HEIGHT + offset)
+            _x, item_top, _width, _height = self._item_geometry(index)
+            total_height = self._content_height()
+            target = max(0.0, item_top + offset)
             self.body.yview_moveto(target / total_height)
         self._schedule_redraw()
 
@@ -1421,11 +1488,11 @@ class CustomTrackTable(tk.Frame):
         index = self._row_lookup.get(str(iid))
         if index is None or not self._rows:
             return
-        top = index * self.ROW_HEIGHT
-        bottom = top + self.ROW_HEIGHT
+        _x, top, _width, height = self._item_geometry(index)
+        bottom = top + height
         visible_top = self.body.canvasy(0)
         visible_bottom = visible_top + self.body.winfo_height()
-        total_height = max(1, len(self._rows) * self.ROW_HEIGHT)
+        total_height = self._content_height()
         if top < visible_top:
             self.body.yview_moveto(top / total_height)
         elif bottom > visible_bottom:
@@ -1434,16 +1501,61 @@ class CustomTrackTable(tk.Frame):
         self._schedule_redraw()
 
     def identify_region(self, x: int, y: int) -> str:
-        return "cell" if self.identify_row(y) and self.identify_column(x) else "nothing"
+        return "cell" if self.identify_row(y, x) and self.identify_column(x, y) else "nothing"
 
-    def identify_row(self, y: int) -> str:
+    def identify_row(self, y: int, x: int | None = None) -> str:
         canvas_y = self.body.canvasy(y)
-        index = int(canvas_y // self.ROW_HEIGHT)
+        if self._view_mode == "tiles":
+            canvas_x = self.body.canvasx(0 if x is None else x)
+            columns, width, height, gap = self._tile_metrics()
+            column = int((canvas_x - gap) // (width + gap))
+            row = int((canvas_y - gap) // (height + gap))
+            if row < 0 or column < 0 or column >= columns:
+                return ""
+            tile_x = gap + column * (width + gap)
+            tile_y = gap + row * (height + gap)
+            if not (tile_x <= canvas_x < tile_x + width and tile_y <= canvas_y < tile_y + height):
+                return ""
+            index = row * columns + column
+        else:
+            index = int(canvas_y // self._row_height())
         if 0 <= index < len(self._rows):
             return self._rows[index][0]
         return ""
 
-    def identify_column(self, x: int) -> str:
+    def identify_column(self, x: int, y: int | None = None) -> str:
+        if self._view_mode == "tiles":
+            iid = self.identify_row(0 if y is None else y, x)
+            index = self._row_lookup.get(iid, -1)
+            if index < 0:
+                return ""
+            tile_x, tile_y, tile_width, tile_height = self._item_geometry(index)
+            canvas_x = self.body.canvasx(x)
+            canvas_y = self.body.canvasy(0 if y is None else y)
+            has_hotkey = "hotkey" in self._display_columns
+            if has_hotkey and canvas_y >= tile_y + tile_height - 50:
+                column = "hotkey"
+            else:
+                actions = ["speaker_play", "favorite", "mic_play", "mic_stop"]
+                group_width = min(192, tile_width - 36)
+                group_left = tile_x + (tile_width - group_width) / 2
+                button_y = tile_y + tile_height - (79 if has_hotkey else 38)
+                if (
+                    group_left <= canvas_x < group_left + group_width
+                    and button_y - 22 <= canvas_y <= button_y + 22
+                ):
+                    action_width = group_width / len(actions)
+                    action_index = min(
+                        len(actions) - 1,
+                        max(0, int((canvas_x - group_left) // action_width)),
+                    )
+                    column = actions[action_index]
+                else:
+                    column = "title"
+            try:
+                return f"#{self._display_columns.index(column) + 1}"
+            except ValueError:
+                return "#1"
         canvas_x = self.body.canvasx(x)
         for index, (_name, left, right) in enumerate(self._column_layout(), start=1):
             if left <= canvas_x < right:
@@ -1492,7 +1604,7 @@ class CustomTrackTable(tk.Frame):
 
     def _on_press(self, event: tk.Event) -> None:
         self.body.focus_set()
-        iid = self.identify_row(event.y)
+        iid = self.identify_row(event.y, event.x)
         if iid:
             self.selection_set(iid)
 
@@ -1514,8 +1626,8 @@ class CustomTrackTable(tk.Frame):
         return self._select_index(current)
 
     def _on_motion(self, event: tk.Event) -> None:
-        iid = self.identify_row(event.y)
-        column_id = self.identify_column(event.x)
+        iid = self.identify_row(event.y, event.x)
+        column_id = self.identify_column(event.x, event.y)
         column = ""
         if column_id:
             index = int(column_id[1:]) - 1
@@ -1586,18 +1698,25 @@ class CustomTrackTable(tk.Frame):
     def _update_geometry(self) -> None:
         if not hasattr(self, "body"):
             return
-        total_width = max(1, sum(right - left for _name, left, right in self._column_layout()))
-        total_height = max(
-            1,
-            self.body.winfo_height(),
-            len(self._rows) * self.ROW_HEIGHT,
+        total_width = (
+            max(1, self.body.winfo_width())
+            if self._view_mode == "tiles"
+            else max(1, sum(right - left for _name, left, right in self._column_layout()))
         )
+        total_height = max(1, self.body.winfo_height(), self._content_height())
         self.body.configure(scrollregion=(0, 0, total_width, total_height))
         if not self._rows or self.body.canvasy(0) < 0:
             self.body.yview_moveto(0.0)
         self.header.configure(scrollregion=(0, 0, total_width, self.HEADER_HEIGHT))
         self._draw_header()
         self._schedule_redraw()
+
+    def _content_height(self) -> int:
+        if self._view_mode == "tiles":
+            columns, _width, height, gap = self._tile_metrics()
+            rows = math.ceil(len(self._rows) / columns) if self._rows else 0
+            return max(1, gap + rows * (height + gap))
+        return max(1, len(self._rows) * self._row_height())
 
     def refresh_style(self) -> None:
         self._draw_header()
@@ -1724,23 +1843,27 @@ class CustomTrackTable(tk.Frame):
         self.body.delete("row")
         if not self._rows:
             return
+        if self._view_mode == "tiles":
+            self._draw_tiles()
+            return
+        row_height = self._row_height()
         top = max(0.0, self.body.canvasy(0))
         bottom = top + max(1, self.body.winfo_height())
-        first = max(0, int(top // self.ROW_HEIGHT) - 1)
-        last = min(len(self._rows), int(bottom // self.ROW_HEIGHT) + 2)
+        first = max(0, int(top // row_height) - 1)
+        last = min(len(self._rows), int(bottom // row_height) + 2)
         layout = self._column_layout()
         total_width = max(1, layout[-1][2] if layout else 1)
         value_indexes = {name: index for index, name in enumerate(self._all_columns)}
         for row_index in range(first, last):
             iid, values = self._rows[row_index]
-            y1 = row_index * self.ROW_HEIGHT
-            y2 = y1 + self.ROW_HEIGHT
+            y1 = row_index * row_height
+            y2 = y1 + row_height
             selected = iid == self._selected_iid
             hovered_row = self._hovered is not None and self._hovered[0] == iid
             if selected:
                 fill = ACCENT
             elif hovered_row:
-                fill = "#334155"
+                fill = HOVER
             else:
                 fill = BG
             self.body.create_rectangle(
@@ -1767,7 +1890,7 @@ class CustomTrackTable(tk.Frame):
                         else TEXT
                     )
                     hover_color = (
-                        (ACCENT_HOVER if selected else "#475569")
+                        (ACCENT_HOVER if selected else SECONDARY)
                         if is_action_hover
                         else None
                     )
@@ -1815,8 +1938,8 @@ class CustomTrackTable(tk.Frame):
                         center_y - 11,
                         center_x + badge_width / 2,
                         center_y + 11,
-                        fill=ACCENT_HOVER if is_action_hover else "#0b1220",
-                        outline="#64748b",
+                        fill=ACCENT_HOVER if is_action_hover else PLAYER_BG,
+                        outline=BORDER,
                         width=1,
                         tags="row",
                     )
@@ -1844,6 +1967,105 @@ class CustomTrackTable(tk.Frame):
                         anchor=canvas_anchor,
                         tags="row",
                     )
+
+    def _draw_tiles(self) -> None:
+        top = max(0.0, self.body.canvasy(0))
+        bottom = top + max(1, self.body.winfo_height())
+        columns, _tile_width, tile_height, gap = self._tile_metrics()
+        first_grid_row = max(0, int(top // (tile_height + gap)) - 1)
+        last_grid_row = int(bottom // (tile_height + gap)) + 2
+        first = first_grid_row * columns
+        last = min(len(self._rows), last_grid_row * columns)
+        indexes = {name: index for index, name in enumerate(self._all_columns)}
+        for index in range(first, last):
+            iid, values = self._rows[index]
+            x, y, width, height = self._item_geometry(index)
+            selected = iid == self._selected_iid
+            hovered = self._hovered is not None and self._hovered[0] == iid
+            fill = ACCENT if selected else HOVER if hovered else CARD
+            self.body.create_rectangle(
+                x,
+                y,
+                x + width,
+                y + height,
+                fill=fill,
+                outline=BORDER if not selected else ACCENT_HOVER,
+                width=1,
+                tags="row",
+            )
+            title = values[indexes["title"]]
+            source = values[indexes["source"]]
+            duration = values[indexes["duration"]]
+            self.body.create_text(
+                x + 14,
+                y + 24,
+                text=self._fit_text(title, width - 28, self._row_font),
+                fill=TEXT,
+                font=("Segoe UI Semibold", 10),
+                anchor="w",
+                tags="row",
+            )
+            secondary = str(source) if "source" in self._display_columns else tr("Тривалість") + f": {duration}"
+            self.body.create_text(
+                x + 14,
+                y + 54,
+                text=self._fit_text(secondary, width - 28, self._hotkey_font),
+                fill=MUTED,
+                font=("Segoe UI", 8),
+                anchor="w",
+                tags="row",
+            )
+            actions = ["speaker_play", "favorite", "mic_play", "mic_stop"]
+            has_hotkey = "hotkey" in self._display_columns
+            group_width = min(192, width - 36)
+            action_width = group_width / len(actions)
+            group_left = x + (width - group_width) / 2
+            button_y = y + height - (79 if has_hotkey else 38)
+            for action_index, name in enumerate(actions):
+                center_x = group_left + action_width * (action_index + 0.5)
+                center_y = button_y
+                value = values[indexes[name]]
+                is_action_hover = self._hovered == (iid, name)
+                symbol = str(value)
+                foreground = "#facc15" if name == "favorite" and symbol == "★" else TEXT
+                background = HOVER if is_action_hover and not selected else ACCENT_HOVER if is_action_hover else None
+                if name == "favorite":
+                    if background is not None:
+                        image = self._action_image("", foreground, background)
+                        self.body.create_image(center_x, center_y, image=image, tags="row")
+                    self.body.create_text(
+                        center_x,
+                        center_y - 1,
+                        text=symbol,
+                        fill=foreground,
+                        font=("Segoe UI Semibold", 11),
+                        tags="row",
+                    )
+                    continue
+                image = self._action_image(symbol, foreground, background)
+                self.body.create_image(center_x, center_y, image=image, tags="row")
+            if has_hotkey:
+                hotkey_value = str(values[indexes["hotkey"]])
+                hotkey_hover = self._hovered == (iid, "hotkey")
+                self.body.create_rectangle(
+                    x + 14,
+                    y + height - 48,
+                    x + width - 14,
+                    y + height - 14,
+                    fill=ACCENT_HOVER if hotkey_hover else PLAYER_BG,
+                    outline=ACCENT if hotkey_hover else BORDER,
+                    width=1,
+                    tags="row",
+                )
+                self.body.create_text(
+                    x + width / 2,
+                    y + height - 31,
+                    text=hotkey_value,
+                    fill=TEXT if hotkey_value != "—" else MUTED,
+                    font=self._hotkey_font,
+                    anchor="center",
+                    tags="row",
+                )
 
 
 class OperationProgressDialog:
@@ -2026,6 +2248,7 @@ class AudioLibraryApp:
         self._update_error = ""
         self._update_settings_refresh = None
         self.update_manager.cleanup_stale_downloads()
+        self._apply_saved_theme()
         self._apply_saved_accent()
         self.start_hidden = start_hidden
         report_startup(36, "Відкриття бази даних…", "Opening database…")
@@ -2227,6 +2450,8 @@ class AudioLibraryApp:
             "accent_color": "Фіолетовий",
             "photo_size": 92,
             "list_density": "comfortable",
+            "library_view": "table",
+            "theme": "dark",
             "window_geometry": None,
             "check_updates_on_startup": True,
         }
@@ -2286,6 +2511,10 @@ class AudioLibraryApp:
             defaults["photo_size"] = 92
         if defaults["list_density"] not in {"compact", "comfortable", "spacious"}:
             defaults["list_density"] = "comfortable"
+        if defaults["library_view"] not in {"table", "tiles"}:
+            defaults["library_view"] = "table"
+        if defaults["theme"] not in {"dark", "light"}:
+            defaults["theme"] = "dark"
         if not isinstance(defaults["window_geometry"], str):
             defaults["window_geometry"] = None
         return defaults
@@ -2350,6 +2579,60 @@ class AudioLibraryApp:
         global ACCENT, ACCENT_HOVER
         name = str(self.app_settings.get("accent_color", "Фіолетовий"))
         ACCENT, ACCENT_HOVER = ACCENT_PRESETS.get(name, ACCENT_PRESETS["Фіолетовий"])
+
+    def _apply_saved_theme(self) -> None:
+        global BG, PANEL, CARD, FIELD, HOVER, BORDER, SECONDARY
+        global PLAYER_BG, TITLE_BG, TITLE_HOVER, PLACEHOLDER, TITLE_TEXT, TEXT, MUTED
+        global FAVORITES_BG, FAVORITES_TEXT, FAVORITES_MUTED, WARNING_BG, WARNING_TEXT
+        global SWITCH_OFF, SWITCH_DISABLED, SWITCH_THUMB, TRAY_STOP_COLOR
+        if self.app_settings.get("theme") == "light":
+            BG = "#e2e8f0"
+            PANEL = "#f8fafc"
+            CARD = "#dbe3ed"
+            FIELD = "#dbe3ed"
+            HOVER = "#cbd5e1"
+            BORDER = "#94a3b8"
+            SECONDARY = "#64748b"
+            PLAYER_BG = "#d4dce7"
+            TITLE_BG = "#f8fafc"
+            TITLE_HOVER = "#e2e8f0"
+            PLACEHOLDER = "#64748b"
+            TITLE_TEXT = "#000000"
+            TEXT = "#0f172a"
+            MUTED = "#475569"
+            FAVORITES_BG = "#e2ad32"
+            FAVORITES_TEXT = "#3b2800"
+            FAVORITES_MUTED = "#6b4a00"
+            WARNING_BG = "#fef3c7"
+            WARNING_TEXT = "#92400e"
+            SWITCH_OFF = "#cbd5e1"
+            SWITCH_DISABLED = "#e2e8f0"
+            SWITCH_THUMB = "#64748b"
+            TRAY_STOP_COLOR = (0, 0, 0, 255)
+        else:
+            BG = "#111827"
+            PANEL = "#1f2937"
+            CARD = "#273449"
+            FIELD = "#374151"
+            HOVER = "#334155"
+            BORDER = "#64748b"
+            SECONDARY = "#475569"
+            PLAYER_BG = "#0b1220"
+            TITLE_BG = "#0b1220"
+            TITLE_HOVER = "#253247"
+            PLACEHOLDER = "#94a3b8"
+            TITLE_TEXT = "#dbe4f0"
+            TEXT = "#f8fafc"
+            MUTED = "#9ca3af"
+            FAVORITES_BG = "#854d0e"
+            FAVORITES_TEXT = "#f8fafc"
+            FAVORITES_MUTED = "#9ca3af"
+            WARNING_BG = "#422006"
+            WARNING_TEXT = "#fde68a"
+            SWITCH_OFF = "#475569"
+            SWITCH_DISABLED = "#273449"
+            SWITCH_THUMB = "#f8fafc"
+            TRAY_STOP_COLOR = (248, 250, 252, 255)
 
     def _save_volume_setting(self) -> None:
         try:
@@ -2470,7 +2753,7 @@ class AudioLibraryApp:
         # компенсирует этот отступ и совмещает значок с центром ячеек.
         image = Image.new("RGBA", (39 * scale, 20 * scale), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
-        color = (248, 250, 252, 255)
+        color = tuple(bytes.fromhex(TEXT.lstrip("#"))) + (255,)
 
         if kind == "speaker":
             draw.polygon(
@@ -2616,7 +2899,7 @@ class AudioLibraryApp:
         scale = 4
         image = Image.new("RGBA", (20 * scale, 18 * scale), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
-        color = (248, 250, 252, 255)
+        color = tuple(bytes.fromhex(TEXT.lstrip("#"))) + (255,)
         draw.polygon(
             [(1 * scale, 7 * scale), (5 * scale, 7 * scale),
              (10 * scale, 3 * scale), (10 * scale, 15 * scale),
@@ -2674,7 +2957,7 @@ class AudioLibraryApp:
         window.withdraw()
         window.overrideredirect(True)
         window.attributes("-topmost", True)
-        window.configure(bg="#334155")
+        window.configure(bg=HOVER)
         window.protocol("WM_DELETE_WINDOW", self._hide_tray_window)
         self.tray_window = window
 
@@ -2696,7 +2979,7 @@ class AudioLibraryApp:
             command=self._hide_tray_window,
             bg=BG,
             fg=MUTED,
-            activebackground="#334155",
+            activebackground=HOVER,
             activeforeground=TEXT,
             relief="flat",
             bd=0,
@@ -2706,7 +2989,7 @@ class AudioLibraryApp:
             font=("Segoe UI Semibold", 15),
         )
         close_button.pack(side="right")
-        close_button.bind("<Enter>", lambda _event: close_button.configure(bg="#334155", fg=TEXT))
+        close_button.bind("<Enter>", lambda _event: close_button.configure(bg=HOVER, fg=TEXT))
         close_button.bind("<Leave>", lambda _event: close_button.configure(bg=BG, fg=MUTED))
 
         list_area = tk.Frame(panel, bg=BG)
@@ -2751,7 +3034,7 @@ class AudioLibraryApp:
         )
         stop_icon = Image.new("RGBA", (20, 18), (0, 0, 0, 0))
         stop_draw = ImageDraw.Draw(stop_icon)
-        stop_draw.rectangle((7, 6, 13, 12), fill=(248, 250, 252, 255))
+        stop_draw.rectangle((7, 6, 13, 12), fill=TRAY_STOP_COLOR)
         self.tray_stop_icon = ImageTk.PhotoImage(stop_icon)
 
         footer = tk.Frame(panel, bg=BG)
@@ -2808,7 +3091,7 @@ class AudioLibraryApp:
                         command=command,
                         bg=CARD,
                         fg=TEXT,
-                        activebackground="#475569",
+                        activebackground=SECONDARY,
                         activeforeground=TEXT,
                         relief="flat",
                         bd=0,
@@ -2823,7 +3106,7 @@ class AudioLibraryApp:
                     )
                     button.bind(
                         "<Enter>",
-                        lambda _event, control=button: control.configure(bg="#475569"),
+                        lambda _event, control=button: control.configure(bg=SECONDARY),
                     )
                     button.bind(
                         "<Leave>",
@@ -3135,7 +3418,7 @@ class AudioLibraryApp:
             ("se", "size_nw_se", {"relx": 1, "x": -8, "rely": 1, "y": -8, "width": 8, "height": 8}),
         )
         for edge, cursor, placement in specs:
-            grip_color = "#0b1220" if edge == "n" else BG
+            grip_color = TITLE_BG if edge == "n" else BG
             grip = tk.Frame(self.root, bg=grip_color, cursor=cursor)
             grip.place(**placement)
             grip.bind("<ButtonPress-1>", lambda event, side=edge: self._start_resize(event, side))
@@ -3184,8 +3467,8 @@ class AudioLibraryApp:
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
     def _build_title_bar(self) -> None:
-        title_color = "#0b1220"
-        hover_color = "#253247"
+        title_color = TITLE_BG
+        hover_color = TITLE_HOVER
         self.title_bar = tk.Frame(self.root, bg=title_color, height=34)
         self.title_bar.pack(fill="x", side="top")
         self.title_bar.pack_propagate(False)
@@ -3211,7 +3494,7 @@ class AudioLibraryApp:
             self.title_bar,
             text="AudioLib",
             bg=title_color,
-            fg="#dbe4f0",
+            fg=TITLE_TEXT,
             font=("Segoe UI", 9),
         )
         title_label.pack(side="left")
@@ -3220,7 +3503,7 @@ class AudioLibraryApp:
             scale = 4
             image = Image.new("RGBA", (18 * scale, 18 * scale), (0, 0, 0, 0))
             draw = ImageDraw.Draw(image)
-            color = (219, 228, 240, 255)
+            color = tuple(bytes.fromhex(TITLE_TEXT.lstrip("#"))) + (255,)
             line_width = max(1, scale)
             if kind == "minimize":
                 draw.line(
@@ -3271,7 +3554,7 @@ class AudioLibraryApp:
                 image=self.titlebar_control_icons[icon],
                 command=command,
                 bg=title_color,
-                fg="#dbe4f0",
+                fg=TITLE_TEXT,
                 activebackground=active,
                 activeforeground="white",
                 relief="flat",
@@ -3305,12 +3588,12 @@ class AudioLibraryApp:
             widget.bind("<ButtonRelease-1>", self._finish_window_drag)
             widget.bind("<Double-Button-1>", self._toggle_maximize)
 
-        tk.Frame(self.root, bg="#334155", height=1).pack(fill="x", side="top")
+        tk.Frame(self.root, bg=BORDER, height=1).pack(fill="x", side="top")
 
     def _build_secondary_title_bar(self, window: tk.Toplevel, title: str) -> None:
         """Draw a compact custom frame matching the main AudioLib window."""
-        title_color = "#0b1220"
-        hover_color = "#253247"
+        title_color = TITLE_BG
+        hover_color = TITLE_HOVER
         window.overrideredirect(True)
         window._audiolib_close_allowed = True
 
@@ -3326,7 +3609,7 @@ class AudioLibraryApp:
             bar,
             text=title,
             bg=title_color,
-            fg="#dbe4f0",
+            fg=TITLE_TEXT,
             font=("Segoe UI", 9),
         )
         title_label.pack(side="left")
@@ -3378,7 +3661,7 @@ class AudioLibraryApp:
             widget.bind("<ButtonPress-1>", start_drag)
             widget.bind("<B1-Motion>", drag)
         window.protocol("WM_DELETE_WINDOW", request_close)
-        tk.Frame(window, bg="#334155", height=1).pack(fill="x", side="top")
+        tk.Frame(window, bg=BORDER, height=1).pack(fill="x", side="top")
 
     def _start_virtual_microphone_background(self) -> bool:
         return self._begin_virtual_microphone_start()
@@ -3602,7 +3885,7 @@ class AudioLibraryApp:
         controls = tk.Frame(dialog, bg=BG)
         controls.pack(fill="x", padx=22, pady=16)
         self._button(controls, "Зберегти", accept, "#0f766e").pack(side="left")
-        self._button(controls, "Скасувати", dialog.destroy, "#475569").pack(
+        self._button(controls, "Скасувати", dialog.destroy, SECONDARY).pack(
             side="left", padx=8
         )
         microphone_list.bind("<Double-Button-1>", lambda _event: accept())
@@ -3660,15 +3943,15 @@ class AudioLibraryApp:
         )
         style.configure("Treeview", background=PANEL, fieldbackground=PANEL, foreground=TEXT,
                         rowheight=row_height, borderwidth=0, font=("Segoe UI", 10))
-        style.configure("Treeview.Heading", background="#374151", foreground=TEXT,
+        style.configure("Treeview.Heading", background=FIELD, foreground=TEXT,
                         relief="flat", font=("Segoe UI Semibold", 10))
         style.map("Treeview", background=[("selected", ACCENT)])
-        style.configure("TScale", background=BG, troughcolor="#374151")
+        style.configure("TScale", background=BG, troughcolor=FIELD)
         style.configure(
             "Settings.Horizontal.TProgressbar",
-            troughcolor="#334155",
+            troughcolor=HOVER,
             background=ACCENT,
-            bordercolor="#334155",
+            bordercolor=HOVER,
             lightcolor=ACCENT,
             darkcolor=ACCENT,
             thickness=7,
@@ -3699,10 +3982,10 @@ class AudioLibraryApp:
             return ImageTk.PhotoImage(image)
 
         self.scrollbar_images = {
-            "normal": scrollbar_thumb("#64748b"),
+            "normal": scrollbar_thumb(BORDER),
             "active": scrollbar_thumb(ACCENT),
             "pressed": scrollbar_thumb(ACCENT_HOVER),
-            "horizontal_normal": horizontal_scrollbar_thumb("#64748b"),
+            "horizontal_normal": horizontal_scrollbar_thumb(BORDER),
             "horizontal_active": horizontal_scrollbar_thumb(ACCENT),
             "horizontal_pressed": horizontal_scrollbar_thumb(ACCENT_HOVER),
         }
@@ -3732,11 +4015,11 @@ class AudioLibraryApp:
         style.configure(
             "AudioLib.Vertical.TScrollbar",
             width=12,
-            troughcolor="#0b1220",
-            background="#64748b",
-            bordercolor="#0b1220",
-            lightcolor="#0b1220",
-            darkcolor="#0b1220",
+            troughcolor=PLAYER_BG,
+            background=BORDER,
+            bordercolor=PLAYER_BG,
+            lightcolor=PLAYER_BG,
+            darkcolor=PLAYER_BG,
             relief="flat",
             borderwidth=0,
         )
@@ -3769,11 +4052,11 @@ class AudioLibraryApp:
         style.configure(
             "AudioLib.Horizontal.TScrollbar",
             width=12,
-            troughcolor="#0b1220",
-            background="#64748b",
-            bordercolor="#0b1220",
-            lightcolor="#0b1220",
-            darkcolor="#0b1220",
+            troughcolor=PLAYER_BG,
+            background=BORDER,
+            bordercolor=PLAYER_BG,
+            lightcolor=PLAYER_BG,
+            darkcolor=PLAYER_BG,
             relief="flat",
             borderwidth=0,
         )
@@ -3793,7 +4076,7 @@ class AudioLibraryApp:
             ACCENT: ACCENT_HOVER,
             DANGER: "#b91c1c",
             "#0f766e": "#0d9488",
-            "#475569": "#64748b",
+            SECONDARY: BORDER,
         }
         hover_color = hover_colors.get(color, ACCENT_HOVER)
         if rounded:
@@ -3859,7 +4142,7 @@ class AudioLibraryApp:
 
         field_height = 42
         field_radius = 10
-        field_color = "#273449"
+        field_color = CARD
         field = tk.Canvas(
             content,
             bg=BG,
@@ -3896,7 +4179,7 @@ class AudioLibraryApp:
                 field_height,
                 fill=field_color,
                 radius=field_radius,
-                outline=ACCENT if focused else "#64748b",
+                outline=ACCENT if focused else BORDER,
                 outline_width=1,
             )
             field.create_image(
@@ -3943,7 +4226,7 @@ class AudioLibraryApp:
 
         actions = tk.Frame(content, bg=BG)
         actions.pack(fill="x", side="bottom", pady=(14, 0))
-        self._button(actions, "Скасувати", close_dialog, "#475569").pack(
+        self._button(actions, "Скасувати", close_dialog, SECONDARY).pack(
             side="right"
         )
         self._button(actions, "Зберегти", submit, ACCENT).pack(
@@ -3952,7 +4235,7 @@ class AudioLibraryApp:
 
         # A subtle outline keeps the borderless dialog readable over panels
         # that use nearly the same dark background.
-        outline_color = "#64748b"
+        outline_color = BORDER
         tk.Frame(dialog, bg=outline_color, height=1).place(
             x=0, y=0, relwidth=1
         )
@@ -3991,7 +4274,7 @@ class AudioLibraryApp:
             header_actions,
             "Налаштування",
             self.open_virtual_microphone_setup,
-            "#475569",
+            SECONDARY,
             image=self.header_action_icons["settings"],
         ).pack(side="left")
 
@@ -4008,7 +4291,7 @@ class AudioLibraryApp:
         LocalizedLabel(left_top, text="Категорії", bg=PANEL, fg=TEXT,
                  font=("Segoe UI Semibold", 16)).pack(side="left")
         self._button(left_top, "+ Додати", self.add_person).pack(side="right")
-        people_search_color = "#374151"
+        people_search_color = FIELD
         people_search_height = 38
         people_search_radius = 10
         people_search_container = tk.Canvas(
@@ -4072,7 +4355,7 @@ class AudioLibraryApp:
             image=self.person_search_icon,
             compound="left",
             bg=people_search_color,
-            fg="#94a3b8",
+            fg=PLACEHOLDER,
             font=("Segoe UI", 10),
             cursor="xterm",
         )
@@ -4111,7 +4394,7 @@ class AudioLibraryApp:
                                      font=("Segoe UI Semibold", 22))
         self.person_title.pack(side="left")
         self.delete_person_button = self._button(person_header, "Видалити", self.delete_person, DANGER)
-        self.edit_person_button = self._button(person_header, "Змінити", self.edit_person, "#475569")
+        self.edit_person_button = self._button(person_header, "Змінити", self.edit_person, SECONDARY)
         self.delete_person_button.pack(side="right", padx=(8, 0))
         self.edit_person_button.pack(side="right")
 
@@ -4120,13 +4403,13 @@ class AudioLibraryApp:
         self.add_tracks_button = self._button(tools, "+ Додати аудіо", self.add_tracks)
         self.add_tracks_button.pack(side="left")
         self.source_column_button = self._button(
-            tools, "Показати оригінальну назву", self.toggle_source_column, "#475569"
+            tools, "Показати оригінальну назву", self.toggle_source_column, SECONDARY
         )
         self.source_column_button.pack(side="left", padx=(8, 0))
         search_width = 270
         search_height = 38
         search_radius = 10
-        search_color_hex = "#374151"
+        search_color_hex = FIELD
         search_container = tk.Canvas(
             tools,
             bg=BG,
@@ -4175,7 +4458,7 @@ class AudioLibraryApp:
             image=self.track_search_icon,
             compound="left",
             bg=search_color_hex,
-            fg="#94a3b8",
+            fg=PLACEHOLDER,
             font=("Segoe UI", 10),
             cursor="xterm",
         )
@@ -4190,7 +4473,7 @@ class AudioLibraryApp:
             "<FocusOut>", lambda _event: self._update_track_search_placeholder()
         )
 
-        tk.Frame(right, bg="#334155", height=1, bd=0).pack(
+        tk.Frame(right, bg=BORDER, height=1, bd=0).pack(
             fill="x",
             padx=(18, 0),
             pady=(4, 0),
@@ -4204,6 +4487,7 @@ class AudioLibraryApp:
             show="headings",
             selectmode="browse",
         )
+        self.track_table.set_view_mode(str(self.app_settings["library_view"]))
         self.track_table.column("number", width=48, minwidth=42, anchor="center", stretch=False)
         self.track_table.column("title", width=240, minwidth=130)
         self.track_table.column("speaker_play", width=58, minwidth=54, anchor="center", stretch=False)
@@ -4258,53 +4542,53 @@ class AudioLibraryApp:
             image=self.button_action_icons["random"],
         )
         self.random_track_button.pack(side="left", padx=(0, 8))
-        self._button(track_actions, "Перейменувати", self.rename_track, "#475569").pack(
+        self._button(track_actions, "Перейменувати", self.rename_track, SECONDARY).pack(
             side="left", padx=(0, 8)
         )
         self._button(track_actions, "Видалити запис", self.delete_track, DANGER).pack(side="left")
 
-        player = tk.Frame(self.root, bg="#0b1220", padx=18, pady=12)
+        player = tk.Frame(self.root, bg=PLAYER_BG, padx=18, pady=10)
         player.pack(fill="x")
-        LocalizedLabel(player, textvariable=self.now_playing, bg="#0b1220", fg=TEXT,
+        LocalizedLabel(player, textvariable=self.now_playing, bg=PLAYER_BG, fg=TEXT,
                  font=("Segoe UI Semibold", 10), width=26, anchor="w").pack(side="left")
         self.play_pause_button = self._button(
             player, "▶", self.toggle_pause
         )
         self.play_pause_button.pack(side="left", padx=(4, 12))
         self._button(
-            player, "■", self.stop_playback, "#475569"
+            player, "■", self.stop_playback, SECONDARY
         ).pack(side="left", padx=(0, 12))
         self.progress = FlatScale(
             player,
             from_=0,
             to=1,
             command=self._preview_seek,
-            background="#0b1220",
-            trough_color="#374151",
-            fill_color="#64748b",
-            active_color=ACCENT,
-            thumb_radius=4,
+            background=PLAYER_BG,
+            trough_color=BORDER,
+            fill_color=ACCENT,
+            active_color=ACCENT_HOVER,
+            thumb_radius=5,
         )
         self.progress.pack(side="left", fill="x", expand=True)
         self.progress.bind(
             "<ButtonPress-1>", lambda _: setattr(self, "seeking", True), add="+"
         )
         self.progress.bind("<ButtonRelease-1>", self._commit_seek, add="+")
-        LocalizedLabel(player, textvariable=self.time_text, bg="#0b1220", fg=MUTED,
-                 font=("Segoe UI", 9), width=12).pack(side="left", padx=10)
+        LocalizedLabel(player, textvariable=self.time_text, bg=PLAYER_BG, fg=MUTED,
+                 font=("Segoe UI Semibold", 9), width=12).pack(side="left", padx=10)
         self.volume_icon = self._make_volume_icon()
-        LocalizedLabel(player, image=self.volume_icon, bg="#0b1220", bd=0).pack(side="left")
+        LocalizedLabel(player, image=self.volume_icon, bg=PLAYER_BG, bd=0).pack(side="left")
         self.volume_scale = FlatScale(
             player,
             from_=0,
             to=1000,
             command=self._set_volume,
-            width=100,
-            background="#0b1220",
-            trough_color="#4b5563",
-            fill_color="#f8fafc",
-            active_color="#ffffff",
-            thumb_radius=0,
+            width=108,
+            background=PLAYER_BG,
+            trough_color=BORDER,
+            fill_color=TEXT,
+            active_color=ACCENT,
+            thumb_radius=3,
         )
         self.volume_scale.set(self.volume_value)
         self.volume_scale.pack(side="left", padx=(5, 0))
@@ -4466,7 +4750,7 @@ class AudioLibraryApp:
         )
         favorites_card = tk.Frame(
             self.people_frame,
-            bg=ACCENT if favorites_selected else "#854d0e",
+            bg=ACCENT if favorites_selected else FAVORITES_BG,
             padx=8,
             pady=card_padding,
             cursor="hand2",
@@ -4485,7 +4769,7 @@ class AudioLibraryApp:
             favorites_card,
             text="★ Favorites",
             bg=favorites_card["bg"],
-            fg=TEXT,
+            fg="#ffffff" if favorites_selected else FAVORITES_TEXT,
             font=("Segoe UI Semibold", 11),
             wraplength=180,
             justify="left",
@@ -4496,7 +4780,7 @@ class AudioLibraryApp:
             favorites_card,
             text=f"{self.store.favorite_count()}/{FAVORITES_LIMIT}",
             bg=favorites_card["bg"],
-            fg=TEXT if favorites_selected else MUTED,
+            fg="#ffffff" if favorites_selected else FAVORITES_MUTED,
             font=("Segoe UI Semibold", 11),
             cursor="hand2",
         )
@@ -4562,7 +4846,7 @@ class AudioLibraryApp:
         background = (
             ACCENT
             if selected
-            else ("#854d0e" if person_id == FAVORITES_PERSON_ID else CARD)
+            else (FAVORITES_BG if person_id == FAVORITES_PERSON_ID else CARD)
         )
         card, photo_label, name_label, count_label = widgets
         for widget in (card, photo_label, name_label, count_label):
@@ -4570,7 +4854,21 @@ class AudioLibraryApp:
                 widget.configure(bg=background)
             except tk.TclError:
                 return
-        count_label.configure(fg=TEXT if selected else MUTED)
+        is_favorites = person_id == FAVORITES_PERSON_ID
+        name_label.configure(
+            fg=(
+                "#ffffff"
+                if selected
+                else FAVORITES_TEXT if is_favorites else TEXT
+            )
+        )
+        count_label.configure(
+            fg=(
+                "#ffffff"
+                if selected
+                else FAVORITES_MUTED if is_favorites else MUTED
+            )
+        )
 
     def select_person(self, person_id: int) -> None:
         previous_person_id = self.selected_person_id
@@ -4911,8 +5209,8 @@ class AudioLibraryApp:
     def _on_track_table_click(self, event: tk.Event) -> None:
         if self.track_table.identify_region(event.x, event.y) != "cell":
             return
-        row_id = self.track_table.identify_row(event.y)
-        display_column = self.track_table.identify_column(event.x)
+        row_id = self.track_table.identify_row(event.y, event.x)
+        display_column = self.track_table.identify_column(event.x, event.y)
         if not row_id or not display_column.startswith("#"):
             return
         display_columns = tuple(self.track_table.cget("displaycolumns"))
@@ -4941,8 +5239,8 @@ class AudioLibraryApp:
     def _on_track_double_click(self, event: tk.Event) -> str | None:
         if self.track_table.identify_region(event.x, event.y) != "cell":
             return None
-        row_id = self.track_table.identify_row(event.y)
-        display_column = self.track_table.identify_column(event.x)
+        row_id = self.track_table.identify_row(event.y, event.x)
+        display_column = self.track_table.identify_column(event.x, event.y)
         if not row_id or not display_column.startswith("#"):
             return None
         display_columns = tuple(self.track_table.cget("displaycolumns"))
@@ -6159,7 +6457,7 @@ class AudioLibraryApp:
             section_header.pack(
                 fill="x", padx=22, pady=(top_padding, 8)
             )
-            tk.Frame(section_header, bg="#334155", height=1).pack(
+            tk.Frame(section_header, bg=BORDER, height=1).pack(
                 side="left", fill="x", expand=True, padx=(0, 10)
             )
             LocalizedLabel(
@@ -6169,7 +6467,7 @@ class AudioLibraryApp:
                 fg=MUTED,
                 font=("Segoe UI Semibold", 10),
             ).pack(side="left")
-            tk.Frame(section_header, bg="#334155", height=1).pack(
+            tk.Frame(section_header, bg=BORDER, height=1).pack(
                 side="left", fill="x", expand=True, padx=(10, 0)
             )
 
@@ -6211,6 +6509,8 @@ class AudioLibraryApp:
         accent_value = tk.StringVar(value=str(self.app_settings["accent_color"]))
         photo_size_value = tk.StringVar()
         density_value = tk.StringVar()
+        library_view_value = tk.StringVar()
+        theme_value = tk.StringVar()
         check_updates_value = tk.BooleanVar(
             value=bool(self.app_settings["check_updates_on_startup"])
         )
@@ -6378,7 +6678,7 @@ class AudioLibraryApp:
             language_controls,
             "Перезапустити",
             request_restart,
-            "#475569",
+            SECONDARY,
         )
 
         def update_language_restart_state(selected_language: str) -> None:
@@ -6450,7 +6750,7 @@ class AudioLibraryApp:
             window_size_row,
             "Повернути за замовчуванням",
             reset_main_window_geometry,
-            "#475569",
+            SECONDARY,
         )
         reset_window_button.pack(side="right", padx=(12, 0))
 
@@ -6583,7 +6883,7 @@ class AudioLibraryApp:
             stop_hotkey_row,
             display_hotkey(str(self.app_settings["stop_hotkey"])),
             lambda: self.assign_stop_hotkey(window, update_stop_hotkey_button),
-            "#475569",
+            SECONDARY,
         )
         stop_hotkey_button.pack(side="right", padx=(12, 0))
 
@@ -6599,7 +6899,7 @@ class AudioLibraryApp:
             header,
             "Офіційна сторінка VB-Audio",
             lambda: webbrowser.open(DRIVER_PAGE),
-            "#475569",
+            SECONDARY,
         ).pack(side="right")
         LocalizedLabel(
             content,
@@ -6760,7 +7060,7 @@ class AudioLibraryApp:
                 "Параметри → Система → Звук і поверніть свій основний пристрій, наприклад "
                 "Динаміки (Realtek Audio)."
             ),
-            bg="#422006", fg="#fde68a", justify="left", wraplength=548,
+            bg=WARNING_BG, fg=WARNING_TEXT, justify="left", wraplength=548,
             padx=11, pady=9, font=("Segoe UI Semibold", 9),
         ).pack(fill="x", padx=22, pady=(6, 4))
 
@@ -6813,7 +7113,7 @@ class AudioLibraryApp:
             buttons, "Видалити / відкотити", lambda: prepare_and_launch(True), DANGER
         ).grid(row=0, column=1, sticky="ew", padx=4)
         self._button(
-            buttons, "Перевірити", refresh_status, "#475569"
+            buttons, "Перевірити", refresh_status, SECONDARY
         ).grid(row=0, column=2, sticky="ew", padx=(4, 0))
         LocalizedLabel(
             content,
@@ -7139,7 +7439,7 @@ class AudioLibraryApp:
         )
         backup_button.grid(row=0, column=0, sticky="ew", padx=(0, 4))
         import_button = self._button(
-            library_actions, "Імпортувати", import_library_backup, "#475569"
+            library_actions, "Імпортувати", import_library_backup, SECONDARY
         )
         import_button.grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
@@ -7150,6 +7450,7 @@ class AudioLibraryApp:
             appearance_panel.columnconfigure(column, weight=1, uniform="appearance")
 
         def appearance_choice(
+            row: int,
             column: int,
             title: str,
             variable: tk.StringVar,
@@ -7157,7 +7458,13 @@ class AudioLibraryApp:
             callback,
         ) -> RoundedDropdown:
             frame = tk.Frame(appearance_panel, bg=PANEL)
-            frame.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 5, 0))
+            frame.grid(
+                row=row,
+                column=column,
+                sticky="ew",
+                padx=(0 if column == 0 else 5, 0),
+                pady=(0 if row == 0 else 10, 0),
+            )
             LocalizedLabel(
                 frame,
                 text=title,
@@ -7222,9 +7529,68 @@ class AudioLibraryApp:
             ttk.Style(self.root).configure("Treeview", rowheight=row_height)
             self.refresh_people()
 
-        appearance_choice(0, "Колір акценту", accent_value, list(ACCENT_PRESETS), apply_accent)
-        appearance_choice(1, "Розмір зображень", photo_size_value, list(photo_labels), apply_photo_size)
-        appearance_choice(2, "Щільність списків", density_value, list(density_labels), apply_density)
+        view_labels = {
+            "Таблиця": "table",
+            "Плитки": "tiles",
+        }
+        library_view_value.set(
+            next(
+                label for label, value in view_labels.items()
+                if value == str(self.app_settings["library_view"])
+            )
+        )
+
+        def apply_library_view() -> None:
+            mode = view_labels[library_view_value.get()]
+            save_setting("library_view", mode)
+            self.track_table.set_view_mode(mode)
+            self.track_table.configure(displaycolumns=self._visible_track_columns())
+            self.refresh_tracks()
+
+        theme_labels = {"Темна": "dark", "Світла": "light"}
+        active_theme = str(self.app_settings["theme"])
+        theme_value.set(
+            next(label for label, value in theme_labels.items() if value == active_theme)
+        )
+
+        def apply_theme() -> None:
+            selected = theme_labels[theme_value.get()]
+            save_setting("theme", selected)
+            theme_restart_button.configure(
+                state="normal" if selected != active_theme else "disabled"
+            )
+            theme_restart_note.configure(
+                text=(
+                    "Перезапустіть AudioLib, щоб застосувати зміни."
+                    if selected != active_theme
+                    else ""
+                )
+            )
+
+        appearance_choice(0, 0, "Колір акценту", accent_value, list(ACCENT_PRESETS), apply_accent)
+        appearance_choice(0, 1, "Розмір зображень", photo_size_value, list(photo_labels), apply_photo_size)
+        appearance_choice(0, 2, "Щільність списків", density_value, list(density_labels), apply_density)
+        appearance_choice(1, 0, "Відображення бібліотеки", library_view_value, list(view_labels), apply_library_view)
+        appearance_choice(1, 1, "Тема", theme_value, list(theme_labels), apply_theme)
+        theme_restart_frame = tk.Frame(appearance_panel, bg=PANEL)
+        theme_restart_frame.grid(row=1, column=2, sticky="sew", padx=(5, 0), pady=(10, 0))
+        theme_restart_note = LocalizedLabel(
+            theme_restart_frame,
+            text="",
+            bg=PANEL,
+            fg=MUTED,
+            anchor="w",
+            font=("Segoe UI", 8),
+        )
+        theme_restart_note.pack(fill="x", pady=(0, 4))
+        theme_restart_button = self._button(
+            theme_restart_frame,
+            "Перезапустити",
+            request_restart,
+            SECONDARY,
+        )
+        theme_restart_button.pack(fill="x")
+        theme_restart_button.configure(state="disabled")
 
         add_section_heading("Оновлення")
         update_panel = tk.Frame(content, bg=PANEL, padx=14, pady=10)
@@ -7272,7 +7638,7 @@ class AudioLibraryApp:
             update_action_row,
             "Перевірити оновлення",
             update_button_action,
-            "#475569",
+            SECONDARY,
         )
         update_button.pack(side="right", padx=(12, 0))
 
@@ -7317,7 +7683,7 @@ class AudioLibraryApp:
 
         about_header = tk.Frame(content, bg=BG)
         about_header.pack(fill="x", padx=22, pady=(18, 8))
-        tk.Frame(about_header, bg="#334155", height=1).pack(
+        tk.Frame(about_header, bg=BORDER, height=1).pack(
             side="left", fill="x", expand=True, padx=(0, 10)
         )
         LocalizedLabel(
@@ -7327,7 +7693,7 @@ class AudioLibraryApp:
             fg=MUTED,
             font=("Segoe UI Semibold", 10),
         ).pack(side="left")
-        tk.Frame(about_header, bg="#334155", height=1).pack(
+        tk.Frame(about_header, bg=BORDER, height=1).pack(
             side="left", fill="x", expand=True, padx=(10, 0)
         )
 
