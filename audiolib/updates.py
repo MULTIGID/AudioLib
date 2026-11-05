@@ -410,6 +410,12 @@ function LocalText([string]$Ukrainian, [string]$English) {
 
 function Refresh-Window {
     if ($null -ne $form -and -not $form.IsDisposed) {
+        if ($script:progressAnimate -and $null -ne $script:progressIndicator) {
+            $travel = [Math]::Max(1, $script:progressTrack.Width - $script:progressIndicator.Width)
+            $phase = [int](([Environment]::TickCount64 / 5) % ($travel * 2))
+            if ($phase -gt $travel) { $phase = ($travel * 2) - $phase }
+            $script:progressIndicator.Left = $phase
+        }
         [System.Windows.Forms.Application]::DoEvents()
     }
 }
@@ -433,8 +439,10 @@ try {
     $form.MaximizeBox = $false
     $form.MinimizeBox = $false
     $form.ControlBox = $false
-    $form.TopMost = $true
-    $form.BackColor = [System.Drawing.Color]::FromArgb(17, 24, 39)
+    # Keep the installer visible without pinning it above unrelated apps.
+    # The user can freely return to Chrome or another foreground window.
+    $form.TopMost = $false
+    $form.BackColor = [System.Drawing.Color]::FromArgb(20, 20, 21)
 
     $picture = New-Object System.Windows.Forms.PictureBox
     $picture.Location = New-Object System.Drawing.Point(173, 18)
@@ -451,7 +459,7 @@ try {
 
     $titleLabel = New-Object System.Windows.Forms.Label
     $titleLabel.Text = "AudioLib"
-    $titleLabel.ForeColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
+    $titleLabel.ForeColor = [System.Drawing.Color]::FromArgb(237, 237, 237)
     $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 16)
     $titleLabel.TextAlign = "MiddleCenter"
     $titleLabel.Location = New-Object System.Drawing.Point(20, 92)
@@ -459,7 +467,7 @@ try {
     $form.Controls.Add($titleLabel)
 
     $script:statusLabel = New-Object System.Windows.Forms.Label
-    $script:statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
+    $script:statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(237, 237, 237)
     $script:statusLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
     $script:statusLabel.TextAlign = "MiddleCenter"
     $script:statusLabel.Location = New-Object System.Drawing.Point(20, 125)
@@ -467,19 +475,24 @@ try {
     $form.Controls.Add($script:statusLabel)
 
     $script:detailLabel = New-Object System.Windows.Forms.Label
-    $script:detailLabel.ForeColor = [System.Drawing.Color]::FromArgb(156, 163, 175)
+    $script:detailLabel.ForeColor = [System.Drawing.Color]::FromArgb(133, 133, 139)
     $script:detailLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8)
     $script:detailLabel.TextAlign = "MiddleCenter"
     $script:detailLabel.Location = New-Object System.Drawing.Point(20, 148)
     $script:detailLabel.Size = New-Object System.Drawing.Size(378, 22)
     $form.Controls.Add($script:detailLabel)
 
-    $progressBar = New-Object System.Windows.Forms.ProgressBar
-    $progressBar.Style = "Marquee"
-    $progressBar.MarqueeAnimationSpeed = 25
-    $progressBar.Location = New-Object System.Drawing.Point(34, 180)
-    $progressBar.Size = New-Object System.Drawing.Size(350, 8)
-    $form.Controls.Add($progressBar)
+    $script:progressAnimate = $true
+    $script:progressTrack = New-Object System.Windows.Forms.Panel
+    $script:progressTrack.Location = New-Object System.Drawing.Point(34, 180)
+    $script:progressTrack.Size = New-Object System.Drawing.Size(350, 8)
+    $script:progressTrack.BackColor = [System.Drawing.Color]::FromArgb(35, 35, 37)
+    $script:progressIndicator = New-Object System.Windows.Forms.Panel
+    $script:progressIndicator.Location = New-Object System.Drawing.Point(0, 0)
+    $script:progressIndicator.Size = New-Object System.Drawing.Size(92, 8)
+    $script:progressIndicator.BackColor = [System.Drawing.Color]::FromArgb(163, 79, 13)
+    $script:progressTrack.Controls.Add($script:progressIndicator)
+    $form.Controls.Add($script:progressTrack)
 
     Set-UpdateStatus (LocalText "Завершення роботи AudioLib…" "Closing AudioLib…") (LocalText "Підготовка до встановлення оновлення" "Preparing to install the update")
     $form.Show()
@@ -572,8 +585,8 @@ catch {
     }
     if ($null -ne $form -and -not $form.IsDisposed) {
         Set-UpdateStatus (LocalText "Не вдалося встановити оновлення" "Update installation failed") $_.Exception.Message
-        $progressBar.Style = "Blocks"
-        $progressBar.Value = 0
+        $script:progressAnimate = $false
+        $script:progressIndicator.Width = 0
         Refresh-Window
         [System.Windows.Forms.MessageBox]::Show(
             $_.Exception.Message,

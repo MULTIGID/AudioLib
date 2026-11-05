@@ -16,7 +16,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 import webbrowser
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import colorchooser, messagebox, ttk
 
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
@@ -59,44 +59,85 @@ from .virtual_audio import (
 from .windows_file_dialog import FileDialogError, choose_files, choose_folder
 
 
-BG = "#111827"
-PANEL = "#1f2937"
-CARD = "#273449"
-FIELD = "#374151"
-HOVER = "#334155"
-BORDER = "#64748b"
-SECONDARY = "#475569"
-PLAYER_BG = "#0b1220"
-TITLE_BG = "#0b1220"
-TITLE_HOVER = "#253247"
-PLACEHOLDER = "#94a3b8"
-TITLE_TEXT = "#dbe4f0"
-FAVORITES_BG = "#854d0e"
-FAVORITES_TEXT = "#f8fafc"
-FAVORITES_MUTED = "#9ca3af"
+BG = "#141415"
+PANEL = "#0f0f10"
+CARD = "#19191b"
+FIELD = "#232325"
+HOVER = "#2b2b2e"
+BORDER = "#343438"
+SECONDARY = "#2b2b2e"
+PLAYER_BG = "#0f0f10"
+TITLE_BG = "#0f0f10"
+TITLE_HOVER = "#232325"
+PLACEHOLDER = "#85858b"
+TITLE_TEXT = "#ededed"
+FAVORITES_BG = "#19191b"
+FAVORITES_SELECTED_BG = "#2b2b2e"
+FAVORITES_TEXT = "#ededed"
+FAVORITES_MUTED = "#85858b"
 WARNING_BG = "#422006"
 WARNING_TEXT = "#fde68a"
-SWITCH_OFF = "#475569"
-SWITCH_DISABLED = "#273449"
-SWITCH_THUMB = "#f8fafc"
-TRAY_STOP_COLOR = (248, 250, 252, 255)
-ACCENT = "#8b5cf6"
-ACCENT_HOVER = "#7c3aed"
+ERROR_BG = "#450a0a"
+ERROR_TEXT = "#fecaca"
+ERROR_BORDER = "#dc2626"
+CAUTION_BORDER = "#b45309"
+SUCCESS_TEXT = "#34d399"
+CAUTION_TEXT = "#fbbf24"
+SWITCH_OFF = "#343438"
+SWITCH_DISABLED = "#232325"
+SWITCH_THUMB = "#ededed"
+TRAY_STOP_COLOR = (237, 237, 237, 255)
+ACCENT = "#a34f0d"
+ACCENT_HOVER = "#873a0a"
 ACCENT_PRESETS = {
-    "Фіолетовий": ("#8b5cf6", "#7c3aed"),
-    "Синій": ("#3b82f6", "#2563eb"),
-    "Бірюзовий": ("#0d9488", "#0f766e"),
-    "Рожевий": ("#ec4899", "#db2777"),
+    "Янтарний": ("#a34f0d", "#873a0a"),
+    "Синій": ("#1d4ed8", "#1e40af"),
+    "Бірюзовий": ("#0f766e", "#115e59"),
+    "Червоний": ("#b42318", "#912018"),
+    "Фіолетовий": ("#7c3aed", "#6d28d9"),
+    "Зелений": ("#15803d", "#166534"),
+    "Рожевий": ("#be185d", "#9d174d"),
+    "Помаранчевий": ("#c2410c", "#9a3412"),
 }
-TEXT = "#f8fafc"
-MUTED = "#9ca3af"
+TEXT = "#ededed"
+MUTED = "#a1a1a6"
 DANGER = "#dc2626"
 FAVORITES_PERSON_ID = -1
 FAVORITES_LIMIT = 15
 STOP_HOTKEY_ACTION_ID = -2
 DEFAULT_STOP_HOTKEY = "Ctrl+Alt+Backspace"
-DEFAULT_WINDOW_WIDTH = 1180
-DEFAULT_WINDOW_HEIGHT = 760
+DEFAULT_WINDOW_WIDTH = 1440
+DEFAULT_WINDOW_HEIGHT = 820
+MIN_WINDOW_WIDTH = 1040
+MIN_WINDOW_HEIGHT = 680
+
+
+def _valid_hex_color(value: object, fallback: str = "#a34f0d") -> str:
+    color = str(value).strip()
+    return color.lower() if re.fullmatch(r"#[0-9a-fA-F]{6}", color) else fallback
+
+
+def _darken_hex_color(value: str, factor: float = 0.82) -> str:
+    color = _valid_hex_color(value)
+    channels = [int(color[index:index + 2], 16) for index in (1, 3, 5)]
+    return "#" + "".join(f"{max(0, min(255, int(channel * factor))):02x}" for channel in channels)
+
+
+def _contrast_text_color(
+    background: str,
+    *,
+    light: str = "#ffffff",
+    dark: str = "#171717",
+) -> str:
+    """Return readable foreground text for an arbitrary solid background."""
+    color = _valid_hex_color(background, "#171717")
+    channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+    linear = [
+        value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+        for value in channels
+    ]
+    luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+    return dark if luminance > 0.42 else light
 
 
 class LocalizedStringVar(tk.StringVar):
@@ -257,6 +298,50 @@ def render_media_control_image(
         (canvas_size, canvas_size),
         Image.Resampling.LANCZOS,
     )
+    return ImageTk.PhotoImage(image)
+
+
+def render_bookmark_image(
+    size: int,
+    foreground: str,
+    *,
+    filled: bool = False,
+    background: str | None = None,
+) -> ImageTk.PhotoImage:
+    """Render a visually centered, anti-aliased bookmark control."""
+    scale = 4
+    pixels = max(1, int(size))
+    image = Image.new("RGBA", (pixels * scale, pixels * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    if background is not None:
+        inset = scale
+        draw.ellipse(
+            (inset, inset, image.width - inset - 1, image.height - inset - 1),
+            fill=background,
+        )
+    center_x = image.width / 2
+    # The V-shaped lower edge makes the bookmark look visually higher even
+    # when its geometric bounds are centered.  A one-pixel optical correction
+    # keeps it aligned with the neighbouring media controls.
+    center_y = image.height / 2 + scale
+    half_width = pixels * 0.19 * scale
+    half_height = pixels * 0.28 * scale
+    top = center_y - half_height
+    bottom = center_y + half_height
+    points = (
+        (center_x - half_width, top),
+        (center_x + half_width, top),
+        (center_x + half_width, bottom),
+        (center_x, bottom - pixels * 0.16 * scale),
+        (center_x - half_width, bottom),
+    )
+    draw.polygon(
+        points,
+        fill=foreground if filled else None,
+        outline=foreground,
+        width=max(scale, int(pixels * 0.055 * scale)),
+    )
+    image = image.resize((pixels, pixels), Image.Resampling.LANCZOS)
     return ImageTk.PhotoImage(image)
 
 
@@ -549,9 +634,9 @@ class RoundedButton(tk.Canvas):
         width = max(1, self.winfo_width(), int(self.cget("width")))
         height = max(1, self.winfo_height(), int(self.cget("height")))
         color = self._background_color()
-        # Application buttons use dark accent surfaces in both themes, so
-        # their active label/icon must stay white for reliable contrast.
-        symbol_color = PLACEHOLDER if self.state == "disabled" else "#ffffff"
+        symbol_color = (
+            PLACEHOLDER if self.state == "disabled" else _contrast_text_color(color)
+        )
         if (
             self.media_control
             and self.button_image is None
@@ -674,6 +759,268 @@ class RoundedButton(tk.Canvas):
         if key == "hover_color":
             return self.hover_color
         return super().cget(key)
+
+
+class WorkspaceTab(tk.Canvas):
+    """A single-piece editor tab with an integrated close target."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        text: str,
+        select_command,
+        close_command,
+        *,
+        active: bool = False,
+    ) -> None:
+        self.text = text
+        self.select_command = select_command
+        self.close_command = close_command
+        self.active = active
+        self.hovered = False
+        self.close_hovered = False
+        self.button_font = tkfont.Font(root=parent, font=("Segoe UI Semibold", 9))
+        self.close_width = 28
+        width = self.button_font.measure(text) + 20 + self.close_width
+        super().__init__(
+            parent,
+            width=width,
+            height=30,
+            bg=parent.cget("bg"),
+            highlightthickness=0,
+            bd=0,
+            cursor="hand2",
+            takefocus=True,
+        )
+        self._surface_image: ImageTk.PhotoImage | None = None
+        self._close_surface_image: ImageTk.PhotoImage | None = None
+        self.bind("<Enter>", self._enter)
+        self.bind("<Leave>", self._leave)
+        self.bind("<Motion>", self._motion)
+        self.bind("<ButtonRelease-1>", self._release)
+        self.bind("<Return>", lambda _event: self.select_command())
+        self.bind("<space>", lambda _event: self.select_command())
+        self.bind("<Delete>", lambda _event: self.close_command())
+        self.bind("<Configure>", lambda _event: self._draw(), add="+")
+        self._draw()
+
+    def _enter(self, _event=None) -> None:
+        self.hovered = True
+        self._draw()
+
+    def _leave(self, _event=None) -> None:
+        self.hovered = False
+        self.close_hovered = False
+        self._draw()
+
+    def _motion(self, event: tk.Event) -> None:
+        close_hovered = event.x >= self.winfo_width() - self.close_width
+        if close_hovered != self.close_hovered:
+            self.close_hovered = close_hovered
+            self._draw()
+
+    def _release(self, event: tk.Event) -> None:
+        if event.x >= self.winfo_width() - self.close_width:
+            self.close_command()
+        else:
+            self.select_command()
+
+    def _draw(self) -> None:
+        self.delete("all")
+        width = max(1, self.winfo_width(), int(self.cget("width")))
+        height = max(1, self.winfo_height(), int(self.cget("height")))
+        color = ACCENT if self.active else HOVER if self.hovered else SECONDARY
+        text_color = _contrast_text_color(color) if self.active else TEXT
+        self._surface_image = render_rounded_surface(
+            width,
+            height,
+            fill=color,
+            radius=7,
+        )
+        self.create_image(0, 0, image=self._surface_image, anchor="nw")
+        divider_x = width - self.close_width
+        self.create_line(divider_x, 6, divider_x, height - 6, fill=BORDER)
+        if self.close_hovered:
+            self._close_surface_image = render_rounded_surface(
+                self.close_width - 6,
+                height - 6,
+                fill=ACCENT_HOVER if self.active else BORDER,
+                radius=5,
+            )
+            self.create_image(
+                divider_x + 3,
+                3,
+                image=self._close_surface_image,
+                anchor="nw",
+            )
+        self.create_text(
+            10,
+            height / 2 - 1,
+            text=self.text,
+            fill=text_color,
+            font=self.button_font,
+            anchor="w",
+        )
+        self.create_text(
+            width - self.close_width / 2,
+            height / 2 - 1,
+            text="×",
+            fill=text_color,
+            font=("Segoe UI", 11),
+            anchor="center",
+        )
+
+
+class RemoteFavoriteButton(tk.Canvas):
+    """Resizable remote tile with protected text padding and hotkey footer."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        *,
+        title: str,
+        hotkey: str,
+        command,
+        color: str,
+        hover_color: str,
+    ) -> None:
+        super().__init__(
+            parent,
+            width=104,
+            height=104,
+            bg=parent.cget("bg"),
+            highlightthickness=0,
+            bd=0,
+            cursor="hand2",
+            takefocus=True,
+        )
+        self.title = title.strip()
+        self.hotkey = "" if hotkey == "—" else hotkey
+        self.command = command
+        self.color = color
+        self.hover_color = hover_color
+        self.hovered = False
+        self.pressed = False
+        self.triggered = False
+        self._trigger_job: str | None = None
+        self.title_font = tkfont.Font(root=parent, font=("Segoe UI Semibold", 9))
+        self.hotkey_font = tkfont.Font(root=parent, font=("Segoe UI", 8))
+        self._surface_image: ImageTk.PhotoImage | None = None
+        self.bind("<Configure>", lambda _event: self._draw(), add="+")
+        self.bind("<Enter>", self._enter)
+        self.bind("<Leave>", self._leave)
+        self.bind("<ButtonPress-1>", self._press)
+        self.bind("<ButtonRelease-1>", self._release)
+        self.bind("<Return>", lambda _event: self.command())
+        self.bind("<space>", lambda _event: self.command())
+        self._draw()
+
+    @staticmethod
+    def _fit_line(text: str, width: int, font: tkfont.Font, *, ellipsis: bool) -> str:
+        if font.measure(text) <= width:
+            return text
+        suffix = "…" if ellipsis else ""
+        available = max(1, width - font.measure(suffix))
+        low, high = 0, len(text)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if font.measure(text[:middle]) <= available:
+                low = middle
+            else:
+                high = middle - 1
+        return text[:low].rstrip() + suffix
+
+    def _display_title(self, width: int) -> str:
+        if self.title_font.measure(self.title) <= width:
+            return self.title
+        first = self._fit_line(self.title, width, self.title_font, ellipsis=False)
+        remainder = self.title[len(first):].lstrip()
+        second = self._fit_line(remainder, width, self.title_font, ellipsis=True)
+        return f"{first}\n{second}" if second else first
+
+    def _draw(self) -> None:
+        self.delete("all")
+        width = max(1, self.winfo_width(), int(self.cget("width")))
+        height = max(1, self.winfo_height(), int(self.cget("height")))
+        active = self.hovered or self.pressed or self.triggered
+        fill = self.hover_color if active else self.color
+        content_color = _contrast_text_color(fill)
+        self._surface_image = render_rounded_surface(
+            width,
+            height,
+            fill=fill,
+            radius=min(9, width // 2, height // 2),
+            outline=ACCENT if active else BORDER,
+            outline_width=2 if self.triggered else 1,
+        )
+        self.create_image(0, 0, image=self._surface_image, anchor="nw")
+        horizontal_padding = 12
+        title_width = max(1, width - horizontal_padding * 2)
+        title_y = (height - 26) / 2 if self.hotkey else height / 2
+        if self.title:
+            self.create_text(
+                width / 2,
+                title_y,
+                text=self._display_title(title_width),
+                width=title_width,
+                fill=content_color,
+                font=self.title_font,
+                justify="center",
+                anchor="center",
+            )
+        if self.hotkey:
+            self.create_text(
+                width / 2,
+                height - 15,
+                text=self.hotkey,
+                fill=content_color,
+                font=self.hotkey_font,
+                anchor="center",
+            )
+
+    def _enter(self, _event=None) -> None:
+        self.hovered = True
+        self._draw()
+
+    def _leave(self, _event=None) -> None:
+        self.hovered = False
+        self.pressed = False
+        self._draw()
+
+    def _press(self, _event=None) -> None:
+        self.pressed = True
+        self._draw()
+
+    def _release(self, event: tk.Event) -> None:
+        invoke = (
+            self.pressed
+            and 0 <= event.x <= self.winfo_width()
+            and 0 <= event.y <= self.winfo_height()
+        )
+        self.pressed = False
+        self._draw()
+        if invoke:
+            self.command()
+
+    def flash(self, duration_ms: int = 450) -> None:
+        """Show a short pressed-state pulse for external/hotkey activation."""
+        if self._trigger_job is not None:
+            try:
+                self.after_cancel(self._trigger_job)
+            except tk.TclError:
+                pass
+        self.triggered = True
+        self._draw()
+
+        def clear() -> None:
+            self._trigger_job = None
+            try:
+                self.triggered = False
+                self._draw()
+            except tk.TclError:
+                pass
+
+        self._trigger_job = self.after(duration_ms, clear)
 
 
 class SmoothRadioButton(tk.Canvas):
@@ -1302,6 +1649,9 @@ class CustomTrackTable(tk.Frame):
         self._action_image_cache: dict[
             tuple[str, str, str | None, int], ImageTk.PhotoImage
         ] = {}
+        self._bookmark_image_cache: dict[
+            tuple[str, bool, str | None, int], ImageTk.PhotoImage
+        ] = {}
 
         self.header = tk.Canvas(
             self,
@@ -1340,6 +1690,25 @@ class CustomTrackTable(tk.Frame):
         )
         self.header.bind("<ButtonRelease-1>", self._on_heading_click, add="+")
         self._update_geometry()
+
+    def _bookmark_image(
+        self,
+        foreground: str,
+        filled: bool,
+        background: str | None,
+        size: int = 27,
+    ) -> ImageTk.PhotoImage:
+        key = (foreground, filled, background, size)
+        image = self._bookmark_image_cache.get(key)
+        if image is None:
+            image = render_bookmark_image(
+                size,
+                foreground,
+                filled=filled,
+                background=background,
+            )
+            self._bookmark_image_cache[key] = image
+        return image
 
     def set_view_mode(self, mode: str) -> None:
         mode = mode if mode in {"table", "tiles"} else "table"
@@ -1896,7 +2265,7 @@ class CustomTrackTable(tk.Frame):
             selected = iid == self._selected_iid
             hovered_row = self._hovered is not None and self._hovered[0] == iid
             if selected:
-                fill = ACCENT
+                fill = HOVER
             elif hovered_row:
                 fill = HOVER
             else:
@@ -1910,6 +2279,16 @@ class CustomTrackTable(tk.Frame):
                 outline="",
                 tags="row",
             )
+            if selected:
+                self.body.create_rectangle(
+                    0,
+                    y1,
+                    3,
+                    y2,
+                    fill=ACCENT,
+                    outline="",
+                    tags="row",
+                )
             for name, left, right in layout:
                 value_index = value_indexes[name]
                 value = values[value_index] if value_index < len(values) else ""
@@ -1919,17 +2298,26 @@ class CustomTrackTable(tk.Frame):
                 is_action_hover = self._hovered == (iid, name)
                 if name in {"speaker_play", "favorite", "mic_play", "mic_stop"}:
                     symbol = str(value)
-                    symbol_color = (
-                        "#facc15"
-                        if name == "favorite" and symbol == "★"
-                        else TEXT
-                    )
+                    symbol_color = TEXT if selected else ACCENT if symbol == "★" else MUTED
                     hover_color = (
                         (ACCENT_HOVER if selected else SECONDARY)
                         if is_action_hover
                         else None
                     )
-                    if symbol in {"▶", "■", "Ⅱ", "‖"}:
+                    if name == "favorite":
+                        bookmark = self._bookmark_image(
+                            symbol_color,
+                            symbol == "★",
+                            hover_color,
+                        )
+                        self.body.create_image(
+                            int(center_x + 0.5),
+                            int(center_y + 0.5),
+                            image=bookmark,
+                            anchor="center",
+                            tags="row",
+                        )
+                    elif symbol in {"▶", "■", "Ⅱ", "‖"}:
                         image = self._action_image(
                             symbol,
                             symbol_color,
@@ -2027,7 +2415,7 @@ class CustomTrackTable(tk.Frame):
             x, y, width, height = self._item_geometry(index)
             selected = iid == self._selected_iid
             hovered = self._hovered is not None and self._hovered[0] == iid
-            fill = ACCENT if selected else HOVER if hovered else CARD
+            fill = HOVER if selected or hovered else CARD
             self.body.create_rectangle(
                 x,
                 y,
@@ -2072,18 +2460,19 @@ class CustomTrackTable(tk.Frame):
                 value = values[indexes[name]]
                 is_action_hover = self._hovered == (iid, name)
                 symbol = str(value)
-                foreground = "#facc15" if name == "favorite" and symbol == "★" else TEXT
+                foreground = TEXT if selected else ACCENT if symbol == "★" else MUTED
                 background = HOVER if is_action_hover and not selected else ACCENT_HOVER if is_action_hover else None
                 if name == "favorite":
-                    if background is not None:
-                        image = self._action_image("", foreground, background)
-                        self.body.create_image(center_x, center_y, image=image, tags="row")
-                    self.body.create_text(
-                        center_x,
-                        center_y - 1,
-                        text=symbol,
-                        fill=foreground,
-                        font=("Segoe UI Semibold", 11),
+                    image = self._bookmark_image(
+                        foreground,
+                        symbol == "★",
+                        background,
+                    )
+                    self.body.create_image(
+                        int(center_x + 0.5),
+                        int(center_y + 0.5),
+                        image=image,
+                        anchor="center",
                         tags="row",
                     )
                     continue
@@ -2327,6 +2716,7 @@ class AudioLibraryApp:
         self.microphone_routing = WindowsMicrophoneRouting(root_dir)
         self._audio_shutdown_done = False
         self._volume_save_job = None
+        self._geometry_save_job = None
         self._session_wndproc = None
         self._previous_wndproc = None
         self.root = root if root is not None else tk.Tk()
@@ -2342,21 +2732,30 @@ class AudioLibraryApp:
             default_geometry,
         )
         self.root.geometry(initial_geometry)
-        self.root.minsize(920, 620)
+        self.root.minsize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self.root.configure(bg=BG)
         self.root.overrideredirect(True)
         self.root.protocol("WM_DELETE_WINDOW", self.handle_window_close)
         self._window_mode = "normal"
-        self._restore_geometry = self.root.geometry()
+        self._restore_geometry = initial_geometry
         self._drag_offset = (0, 0)
         self._resize_data: tuple[str, int, int, int, int, int, int] | None = None
         self._restore_override_after_map = False
         self._taskbar_style_initialized = False
         self.resize_grips: list[tk.Frame] = []
+        self.window_outline_frames: list[tk.Frame] = []
         self._accent_buttons: list[tk.Widget] = []
         self.app_icon: ImageTk.PhotoImage | None = None
         self.tray_icon = None
         self.tray_window: tk.Toplevel | None = None
+        self.remote_window: tk.Toplevel | None = None
+        self.remote_settings_window: tk.Toplevel | None = None
+        self.remote_output_target = "speaker"
+        self.remote_output_buttons: dict[str, tk.Widget] = {}
+        self.remote_track_buttons: dict[int, list[RemoteFavoriteButton]] = {}
+        self.remote_favorites_frame: tk.Frame | None = None
+        self.remote_count_label: tk.Label | None = None
+        self.tray_count_label: tk.Label | None = None
         self.tray_window_items: tk.Frame | None = None
         self.tray_window_canvas: tk.Canvas | None = None
         self.tray_stop_icon: ImageTk.PhotoImage | None = None
@@ -2376,6 +2775,9 @@ class AudioLibraryApp:
         self._library_task_in_progress = False
         self._virtual_start_in_progress = False
         self._virtual_start_callback = None
+        self._audio_recovery_attempts = 0
+        self._audio_recovery_last_attempt = 0.0
+        self._audio_health_last_reason = ""
         self._pending_microphone_playback: tuple[object, ...] | None = None
         self._closing_event = threading.Event()
         self._speaker_load_serial = 0
@@ -2389,6 +2791,7 @@ class AudioLibraryApp:
         self._set_app_icon()
 
         self.selected_person_id: int | None = None
+        self.workspace_open_tabs: list[int] = []
         self.current_track_id: int | None = None
         self.virtual_track_id: int | None = None
         self._last_speaker_table_state: tuple[int | None, str] = (None, "stopped")
@@ -2407,7 +2810,7 @@ class AudioLibraryApp:
         self.categories_collapsed = bool(
             self.app_settings.get("categories_collapsed", False)
         )
-        self._categories_expanded_width = 390
+        self._categories_expanded_width = 280
         self.track_sort_column = "title"
         self.track_sort_descending = False
         self.source_column_visible = False
@@ -2441,6 +2844,7 @@ class AudioLibraryApp:
         self._build_ui()
         self._create_resize_grips()
         self.root.bind("<Map>", self._on_root_map, add="+")
+        self.root.bind("<Configure>", self._schedule_window_geometry_save, add="+")
         self.root.after(20, self._ensure_taskbar_presence)
         self.root.after(250, self._ensure_taskbar_presence)
         self.person_query.trace_add("write", self._on_person_query_changed)
@@ -2459,6 +2863,7 @@ class AudioLibraryApp:
         self.root.after(10, self._poll_audio_load_results)
         self.root.after(10, self._poll_virtual_start_results)
         self.root.after(10, self._poll_library_task_results)
+        self.root.after(1000, self._poll_audio_stream_health)
         self._refresh_legacy_metadata_async()
         self._start_tray_icon()
         report_startup(94, "Завершення запуску…", "Finishing startup…")
@@ -2497,7 +2902,8 @@ class AudioLibraryApp:
             "local_monitoring": True,
             "kernel_streaming_cable": True,
             "latency_profile": "balanced",
-            "accent_color": "Фіолетовий",
+            "accent_color": "Янтарний",
+            "custom_accent_color": "#a34f0d",
             "photo_size": 92,
             "list_density": "comfortable",
             "library_view": "table",
@@ -2505,6 +2911,9 @@ class AudioLibraryApp:
             "window_geometry": None,
             "check_updates_on_startup": True,
             "categories_collapsed": False,
+            "remote_button_customizations": {},
+            "remote_slots": [None] * FAVORITES_LIMIT,
+            "show_workspace_tabs": False,
         }
         try:
             payload = json.loads(self.app_settings_path.read_text(encoding="utf-8"))
@@ -2536,6 +2945,7 @@ class AudioLibraryApp:
             ("kernel_streaming_cable", True),
             ("check_updates_on_startup", True),
             ("categories_collapsed", False),
+            ("show_workspace_tabs", False),
         ):
             if not isinstance(defaults[key], bool):
                 defaults[key] = fallback
@@ -2557,8 +2967,11 @@ class AudioLibraryApp:
             defaults["output_device"] = ""
         if defaults["latency_profile"] not in {"low", "balanced", "stable"}:
             defaults["latency_profile"] = "balanced"
-        if defaults["accent_color"] not in ACCENT_PRESETS:
-            defaults["accent_color"] = "Фіолетовий"
+        if defaults["accent_color"] not in {*ACCENT_PRESETS, "Власний"}:
+            defaults["accent_color"] = "Янтарний"
+        defaults["custom_accent_color"] = _valid_hex_color(
+            defaults.get("custom_accent_color")
+        )
         if defaults["photo_size"] not in {72, 92, 108}:
             defaults["photo_size"] = 92
         if defaults["list_density"] not in {"compact", "comfortable", "spacious"}:
@@ -2569,6 +2982,50 @@ class AudioLibraryApp:
             defaults["theme"] = "dark"
         if not isinstance(defaults["window_geometry"], str):
             defaults["window_geometry"] = None
+        customizations = defaults.get("remote_button_customizations")
+        clean_customizations: dict[str, dict[str, str]] = {}
+        allowed_colors = {"Графітний", *ACCENT_PRESETS.keys(), "Власний"}
+        if isinstance(customizations, dict):
+            for track_id, value in customizations.items():
+                if not isinstance(value, dict):
+                    continue
+                label = str(value.get("label", "")).strip()[:64]
+                color = str(value.get("color", "Графітний"))
+                if color not in allowed_colors:
+                    color = "Графітний"
+                clean_customizations[str(track_id)] = {
+                    "label": label,
+                    "color": color,
+                }
+        defaults["remote_button_customizations"] = clean_customizations
+        slots = defaults.get("remote_slots")
+        clean_slots: list[dict[str, object] | None] = []
+        if isinstance(slots, list):
+            for value in slots[:FAVORITES_LIMIT]:
+                if not isinstance(value, dict):
+                    clean_slots.append(None)
+                    continue
+                try:
+                    track_id = int(value.get("track_id"))
+                except (TypeError, ValueError):
+                    clean_slots.append(None)
+                    continue
+                label = str(value.get("label", "")).strip()[:64]
+                color = str(value.get("color", "Графітний"))
+                if color not in allowed_colors:
+                    color = "Графітний"
+                clean_slots.append(
+                    {
+                        "track_id": track_id,
+                        "label": label,
+                        "color": color,
+                        "custom_color": _valid_hex_color(
+                            value.get("custom_color", "#a34f0d")
+                        ),
+                    }
+                )
+        clean_slots.extend([None] * (FAVORITES_LIMIT - len(clean_slots)))
+        defaults["remote_slots"] = clean_slots
         return defaults
 
     def _validated_window_geometry(
@@ -2596,8 +3053,8 @@ class AudioLibraryApp:
             screen_height = self.root.winfo_screenheight()
         right = left + screen_width
         bottom = top + screen_height
-        width = max(920, min(width, screen_width))
-        height = max(620, min(height, screen_height))
+        width = max(MIN_WINDOW_WIDTH, min(width, screen_width))
+        height = max(MIN_WINDOW_HEIGHT, min(height, screen_height))
         # Keep at least part of the title bar reachable after monitor changes.
         x = min(max(x, left - width + 120), right - 120)
         y = min(max(y, top), bottom - 40)
@@ -2627,64 +3084,107 @@ class AudioLibraryApp:
         except (AttributeError, tk.TclError):
             pass
 
+    def _schedule_window_geometry_save(self, event: tk.Event | None = None) -> None:
+        """Persist the last stable size and position even after an abrupt exit."""
+        if event is not None and event.widget is not self.root:
+            return
+        if self._window_mode != "normal":
+            return
+        if self._geometry_save_job is not None:
+            try:
+                self.root.after_cancel(self._geometry_save_job)
+            except tk.TclError:
+                pass
+        self._geometry_save_job = self.root.after(600, self._persist_window_geometry)
+
+    def _persist_window_geometry(self) -> None:
+        self._geometry_save_job = None
+        if self._window_mode != "normal":
+            return
+        self._save_window_geometry()
+        self._save_volume_setting()
+
     def _apply_saved_accent(self) -> None:
         global ACCENT, ACCENT_HOVER
-        name = str(self.app_settings.get("accent_color", "Фіолетовий"))
-        ACCENT, ACCENT_HOVER = ACCENT_PRESETS.get(name, ACCENT_PRESETS["Фіолетовий"])
+        name = str(self.app_settings.get("accent_color", "Янтарний"))
+        if name == "Власний":
+            ACCENT = _valid_hex_color(self.app_settings.get("custom_accent_color"))
+            ACCENT_HOVER = _darken_hex_color(ACCENT)
+        else:
+            ACCENT, ACCENT_HOVER = ACCENT_PRESETS.get(
+                name, ACCENT_PRESETS["Янтарний"]
+            )
 
     def _apply_saved_theme(self) -> None:
         global BG, PANEL, CARD, FIELD, HOVER, BORDER, SECONDARY
         global PLAYER_BG, TITLE_BG, TITLE_HOVER, PLACEHOLDER, TITLE_TEXT, TEXT, MUTED
-        global FAVORITES_BG, FAVORITES_TEXT, FAVORITES_MUTED, WARNING_BG, WARNING_TEXT
+        global FAVORITES_BG, FAVORITES_SELECTED_BG, FAVORITES_TEXT, FAVORITES_MUTED
+        global WARNING_BG, WARNING_TEXT
+        global ERROR_BG, ERROR_TEXT, ERROR_BORDER, CAUTION_BORDER
+        global SUCCESS_TEXT, CAUTION_TEXT
         global SWITCH_OFF, SWITCH_DISABLED, SWITCH_THUMB, TRAY_STOP_COLOR
         if self.app_settings.get("theme") == "light":
-            BG = "#e2e8f0"
-            PANEL = "#f8fafc"
-            CARD = "#dbe3ed"
-            FIELD = "#dbe3ed"
-            HOVER = "#cbd5e1"
-            BORDER = "#94a3b8"
-            SECONDARY = "#64748b"
-            PLAYER_BG = "#d4dce7"
-            TITLE_BG = "#f8fafc"
-            TITLE_HOVER = "#e2e8f0"
-            PLACEHOLDER = "#64748b"
-            TITLE_TEXT = "#000000"
-            TEXT = "#0f172a"
-            MUTED = "#475569"
-            FAVORITES_BG = "#e2ad32"
-            FAVORITES_TEXT = "#3b2800"
-            FAVORITES_MUTED = "#6b4a00"
-            WARNING_BG = "#fef3c7"
-            WARNING_TEXT = "#92400e"
-            SWITCH_OFF = "#cbd5e1"
-            SWITCH_DISABLED = "#e2e8f0"
-            SWITCH_THUMB = "#64748b"
-            TRAY_STOP_COLOR = (0, 0, 0, 255)
+            BG = "#eceff3"
+            PANEL = "#f8f9fb"
+            CARD = "#ffffff"
+            FIELD = "#e3e7ed"
+            HOVER = "#d9dee6"
+            BORDER = "#c5cbd4"
+            SECONDARY = "#e1e5eb"
+            PLAYER_BG = "#f8f9fb"
+            TITLE_BG = "#ffffff"
+            TITLE_HOVER = "#e8ebf0"
+            PLACEHOLDER = "#6b7280"
+            TITLE_TEXT = "#171717"
+            TEXT = "#171717"
+            MUTED = "#596273"
+            FAVORITES_BG = "#fff1c2"
+            FAVORITES_SELECTED_BG = "#f6d98d"
+            FAVORITES_TEXT = "#5f3b00"
+            FAVORITES_MUTED = "#8a5700"
+            WARNING_BG = "#fff3d6"
+            WARNING_TEXT = "#7a3a00"
+            ERROR_BG = "#fff1f2"
+            ERROR_TEXT = "#991b1b"
+            ERROR_BORDER = "#dc2626"
+            CAUTION_BORDER = "#d97706"
+            SUCCESS_TEXT = "#047857"
+            CAUTION_TEXT = "#a16207"
+            SWITCH_OFF = "#c7ced8"
+            SWITCH_DISABLED = "#e3e7ed"
+            SWITCH_THUMB = "#ffffff"
+            TRAY_STOP_COLOR = (23, 23, 23, 255)
         else:
-            BG = "#111827"
-            PANEL = "#1f2937"
-            CARD = "#273449"
-            FIELD = "#374151"
-            HOVER = "#334155"
-            BORDER = "#64748b"
-            SECONDARY = "#475569"
-            PLAYER_BG = "#0b1220"
-            TITLE_BG = "#0b1220"
-            TITLE_HOVER = "#253247"
-            PLACEHOLDER = "#94a3b8"
-            TITLE_TEXT = "#dbe4f0"
-            TEXT = "#f8fafc"
-            MUTED = "#9ca3af"
-            FAVORITES_BG = "#854d0e"
-            FAVORITES_TEXT = "#f8fafc"
-            FAVORITES_MUTED = "#9ca3af"
+            BG = "#141415"
+            PANEL = "#0f0f10"
+            CARD = "#19191b"
+            FIELD = "#232325"
+            HOVER = "#2b2b2e"
+            BORDER = "#343438"
+            SECONDARY = "#2b2b2e"
+            PLAYER_BG = "#0f0f10"
+            TITLE_BG = "#0f0f10"
+            TITLE_HOVER = "#232325"
+            PLACEHOLDER = "#85858b"
+            TITLE_TEXT = "#ededed"
+            TEXT = "#ededed"
+            MUTED = "#a1a1a6"
+            FAVORITES_BG = "#19191b"
+            FAVORITES_SELECTED_BG = "#2b2b2e"
+            FAVORITES_TEXT = "#ededed"
+            FAVORITES_MUTED = "#85858b"
             WARNING_BG = "#422006"
             WARNING_TEXT = "#fde68a"
-            SWITCH_OFF = "#475569"
-            SWITCH_DISABLED = "#273449"
-            SWITCH_THUMB = "#f8fafc"
-            TRAY_STOP_COLOR = (248, 250, 252, 255)
+            ERROR_BG = "#450a0a"
+            ERROR_TEXT = "#fecaca"
+            ERROR_BORDER = "#dc2626"
+            CAUTION_BORDER = "#b45309"
+            SUCCESS_TEXT = "#34d399"
+            CAUTION_TEXT = "#fbbf24"
+            SWITCH_OFF = "#343438"
+            SWITCH_DISABLED = "#232325"
+            SWITCH_THUMB = "#ededed"
+            TRAY_STOP_COLOR = (237, 237, 237, 255)
 
     def _save_volume_setting(self) -> None:
         try:
@@ -2875,7 +3375,10 @@ class AudioLibraryApp:
             "RGBA", (size * scale, size * scale), (0, 0, 0, 0)
         )
         draw = ImageDraw.Draw(image)
-        color = (248, 250, 252, 255)
+        icon_surface = SECONDARY if kind == "settings" else ACCENT
+        color = tuple(
+            bytes.fromhex(_contrast_text_color(icon_surface).lstrip("#"))
+        ) + (255,)
 
         if kind == "microphone":
             draw.rounded_rectangle(
@@ -3009,22 +3512,30 @@ class AudioLibraryApp:
         window.withdraw()
         window.overrideredirect(True)
         window.attributes("-topmost", True)
-        window.configure(bg=HOVER)
+        window.configure(bg=BORDER)
         window.protocol("WM_DELETE_WINDOW", self._hide_tray_window)
         self.tray_window = window
 
-        panel = tk.Frame(window, bg=BG, padx=12, pady=10)
+        panel = tk.Frame(window, bg=BG, padx=16, pady=14)
         panel.pack(fill="both", expand=True, padx=1, pady=1)
 
         header = tk.Frame(panel, bg=BG)
-        header.pack(fill="x", pady=(0, 8))
+        header.pack(fill="x", pady=(0, 12))
         LocalizedLabel(
             header,
-            text="★ Favorites",
+            text="Favorites",
             bg=BG,
             fg=TEXT,
-            font=("Segoe UI Semibold", 14),
+            font=("Segoe UI Semibold", 13),
         ).pack(side="left")
+        self.tray_count_label = LocalizedLabel(
+            header,
+            text="",
+            bg=BG,
+            fg=MUTED,
+            font=("Segoe UI", 9),
+        )
+        self.tray_count_label.pack(side="left", padx=(8, 0), pady=(2, 0))
         close_button = tk.Button(
             header,
             text="×",
@@ -3035,10 +3546,10 @@ class AudioLibraryApp:
             activeforeground=TEXT,
             relief="flat",
             bd=0,
-            padx=8,
+            padx=7,
             pady=0,
             cursor="hand2",
-            font=("Segoe UI Semibold", 15),
+            font=("Segoe UI", 14),
         )
         close_button.pack(side="right")
         close_button.bind("<Enter>", lambda _event: close_button.configure(bg=HOVER, fg=TEXT))
@@ -3051,7 +3562,7 @@ class AudioLibraryApp:
             bg=BG,
             highlightthickness=0,
             bd=0,
-            width=390,
+            width=410,
         )
         scrollbar = ttk.Scrollbar(
             list_area,
@@ -3089,8 +3600,16 @@ class AudioLibraryApp:
         stop_draw.rectangle((7, 6, 13, 12), fill=TRAY_STOP_COLOR)
         self.tray_stop_icon = ImageTk.PhotoImage(stop_icon)
 
+        tk.Frame(panel, bg=BORDER, height=1).pack(fill="x", pady=(12, 10))
         footer = tk.Frame(panel, bg=BG)
-        footer.pack(fill="x", pady=(10, 0))
+        footer.pack(fill="x")
+        LocalizedLabel(
+            footer,
+            text="Один клік — керування, подвійний — AudioLib",
+            bg=BG,
+            fg=MUTED,
+            font=("Segoe UI", 8),
+        ).pack(side="left")
         self._button(footer, "Вийти", self._close, DANGER).pack(side="right")
 
         window.bind("<FocusOut>", self._schedule_tray_window_focus_check, add="+")
@@ -3101,6 +3620,8 @@ class AudioLibraryApp:
             return
         for child in self.tray_window_items.winfo_children():
             child.destroy()
+        if self.tray_count_label is not None:
+            self.tray_count_label.configure(text=str(len(self.tray_favorites)))
         if not self.tray_favorites:
             LocalizedLabel(
                 self.tray_window_items,
@@ -3111,23 +3632,35 @@ class AudioLibraryApp:
                 font=("Segoe UI", 10),
             ).pack(fill="x")
         else:
-            for track_id, label in self.tray_favorites:
+            for index, (track_id, label) in enumerate(self.tray_favorites):
                 item = tk.Frame(
                     self.tray_window_items,
-                    bg=CARD,
-                    padx=12,
-                    pady=5,
+                    bg=BG,
+                    padx=4,
+                    pady=7,
                 )
-                item.pack(fill="x", pady=2)
+                item.pack(fill="x")
+                label_parts = label.rsplit(" — ", 1)
+                text_area = tk.Frame(item, bg=BG)
+                text_area.pack(side="left", fill="x", expand=True)
                 title = LocalizedLabel(
-                    item,
-                    text=label,
-                    bg=CARD,
+                    text_area,
+                    text=label_parts[0],
+                    bg=BG,
                     fg=TEXT,
                     anchor="w",
-                    font=("Segoe UI", 10),
+                    font=("Segoe UI Semibold", 9),
                 )
-                title.pack(side="left", fill="x", expand=True)
+                title.pack(fill="x")
+                category = LocalizedLabel(
+                    text_area,
+                    text=label_parts[1] if len(label_parts) > 1 else "",
+                    bg=BG,
+                    fg=MUTED,
+                    anchor="w",
+                    font=("Segoe UI", 8),
+                )
+                category.pack(fill="x", pady=(1, 0))
 
                 def tray_control(
                     parent: tk.Misc,
@@ -3141,7 +3674,7 @@ class AudioLibraryApp:
                         text=text,
                         image=image,
                         command=command,
-                        bg=CARD,
+                        bg=BG,
                         fg=TEXT,
                         activebackground=SECONDARY,
                         activeforeground=TEXT,
@@ -3149,7 +3682,7 @@ class AudioLibraryApp:
                         bd=0,
                         highlightthickness=0,
                         width=30,
-                        height=26,
+                        height=30,
                         padx=0,
                         pady=0,
                         anchor="center",
@@ -3158,11 +3691,11 @@ class AudioLibraryApp:
                     )
                     button.bind(
                         "<Enter>",
-                        lambda _event, control=button: control.configure(bg=SECONDARY),
+                        lambda _event, control=button: control.configure(bg=HOVER),
                     )
                     button.bind(
                         "<Leave>",
-                        lambda _event, control=button: control.configure(bg=CARD),
+                        lambda _event, control=button: control.configure(bg=BG),
                     )
                     return button
 
@@ -3172,32 +3705,38 @@ class AudioLibraryApp:
                         self.stop_track_audio, tid
                     ),
                     image=self.tray_stop_icon,
-                ).pack(side="right", padx=(3, 0))
+                ).pack(side="right", padx=(4, 0))
                 tray_control(
                     item,
                     command=lambda tid=track_id: self._run_tray_track_action(
                         self.toggle_track_microphone, tid
                     ),
                     image=self.tray_control_icons["mic_play"],
-                ).pack(side="right", padx=(3, 0))
+                ).pack(side="right", padx=(4, 0))
                 tray_control(
                     item,
                     command=lambda tid=track_id: self._run_tray_track_action(
                         self.toggle_track_speaker, tid
                     ),
                     image=self.tray_control_icons["speaker_play"],
-                ).pack(side="right", padx=(3, 0))
+                ).pack(side="right", padx=(8, 0))
 
-                for widget in (item, title, *item.winfo_children()):
+                for widget in (item, text_area, title, category, *item.winfo_children()):
                     widget.bind(
                         "<MouseWheel>",
                         lambda event: self.tray_window_canvas.yview_scroll(
                             -1 if event.delta > 0 else 1, "units"
                         ),
                     )
+                if index < len(self.tray_favorites) - 1:
+                    tk.Frame(
+                        self.tray_window_items,
+                        bg=BORDER,
+                        height=1,
+                    ).pack(fill="x", padx=4)
         if self.tray_window_canvas is not None:
             row_count = max(1, len(self.tray_favorites))
-            self.tray_window_canvas.configure(height=min(430, 48 + row_count * 40))
+            self.tray_window_canvas.configure(height=min(430, 12 + row_count * 52))
             self.tray_window.update_idletasks()
             self.tray_window_canvas.configure(
                 scrollregion=self.tray_window_canvas.bbox("all")
@@ -3332,6 +3871,85 @@ class AudioLibraryApp:
         except (AttributeError, OSError):
             pass
 
+    def _ensure_auxiliary_taskbar_presence(self, window: tk.Toplevel) -> None:
+        """Expose an overrideredirect utility window as a real taskbar window."""
+        try:
+            if not window.winfo_exists():
+                return
+            user32 = ctypes.windll.user32
+            handle = int(window.winfo_id())
+            get_parent = user32.GetParent
+            get_parent.argtypes = [ctypes.c_void_p]
+            get_parent.restype = ctypes.c_void_p
+            wrapper = int(get_parent(ctypes.c_void_p(handle)) or 0)
+            handle = wrapper or handle
+            GWL_EXSTYLE = -20
+            WS_EX_TOOLWINDOW = 0x00000080
+            WS_EX_APPWINDOW = 0x00040000
+            SWP_NOSIZE = 0x0001
+            SWP_NOMOVE = 0x0002
+            SWP_NOZORDER = 0x0004
+            SWP_NOACTIVATE = 0x0010
+            SWP_FRAMECHANGED = 0x0020
+            SW_HIDE = 0
+            SW_SHOW = 5
+            user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            user32.GetWindowLongW.restype = ctypes.c_long
+            user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
+            user32.SetWindowLongW.restype = ctypes.c_long
+            style = user32.GetWindowLongW(ctypes.c_void_p(handle), GWL_EXSTYLE)
+            user32.SetWindowLongW(
+                ctypes.c_void_p(handle),
+                GWL_EXSTYLE,
+                (style & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW,
+            )
+            user32.SetWindowPos(
+                ctypes.c_void_p(handle),
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
+            if not getattr(window, "_audiolib_taskbar_initialized", False):
+                user32.ShowWindow(ctypes.c_void_p(handle), SW_HIDE)
+                user32.ShowWindow(ctypes.c_void_p(handle), SW_SHOW)
+                window._audiolib_taskbar_initialized = True
+            self._set_toplevel_topmost(window, True)
+        except (AttributeError, OSError, tk.TclError):
+            pass
+
+    def _set_toplevel_topmost(self, window: tk.Toplevel, enabled: bool) -> None:
+        """Set the real Windows z-order in addition to Tk's topmost flag."""
+        try:
+            if not window.winfo_exists():
+                return
+            window.attributes("-topmost", bool(enabled))
+            user32 = ctypes.windll.user32
+            handle = int(window.winfo_id())
+            get_parent = user32.GetParent
+            get_parent.argtypes = [ctypes.c_void_p]
+            get_parent.restype = ctypes.c_void_p
+            wrapper = int(get_parent(ctypes.c_void_p(handle)) or 0)
+            handle = wrapper or handle
+            HWND_TOPMOST = -1
+            HWND_NOTOPMOST = -2
+            SWP_NOSIZE = 0x0001
+            SWP_NOMOVE = 0x0002
+            SWP_NOACTIVATE = 0x0010
+            user32.SetWindowPos(
+                ctypes.c_void_p(handle),
+                ctypes.c_void_p(HWND_TOPMOST if enabled else HWND_NOTOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE,
+            )
+        except (AttributeError, OSError, tk.TclError):
+            pass
+
     def _on_root_map(self, _event=None) -> None:
         if self._restore_override_after_map:
             self._restore_override_after_map = False
@@ -3393,7 +4011,10 @@ class AudioLibraryApp:
             self._restore_window()
             return
         if self._window_mode == "normal":
-            self._restore_geometry = self.root.geometry()
+            self._restore_geometry = self._validated_window_geometry(
+                self.root.geometry(),
+                self._default_window_geometry(),
+            )
         left, top, right, bottom = self._work_area()
         width = right - left
         height = bottom - top
@@ -3412,6 +4033,10 @@ class AudioLibraryApp:
     def _restore_window(self) -> None:
         if self._window_mode == "normal":
             return
+        self._restore_geometry = self._validated_window_geometry(
+            self._restore_geometry,
+            self._default_window_geometry(),
+        )
         self.root.geometry(self._restore_geometry)
         self._window_mode = "normal"
         self.maximize_button.configure(image=self.titlebar_control_icons["maximize"])
@@ -3462,12 +4087,12 @@ class AudioLibraryApp:
             # Keep resize handles away from the title-bar controls.  Tk frames
             # are opaque, so placing them over a hovered button visually cuts
             # its background at the top and right edges.
-            ("n", "sb_v_double_arrow", {"x": 7, "y": 0, "relwidth": 1, "width": -152, "height": 5}),
-            ("s", "sb_v_double_arrow", {"x": 7, "rely": 1, "y": -5, "relwidth": 1, "width": -14, "height": 5}),
-            ("w", "sb_h_double_arrow", {"x": 0, "y": 35, "width": 5, "relheight": 1, "height": -42}),
-            ("e", "sb_h_double_arrow", {"relx": 1, "x": -5, "y": 35, "width": 5, "relheight": 1, "height": -42}),
-            ("sw", "size_ne_sw", {"x": 0, "rely": 1, "y": -8, "width": 8, "height": 8}),
-            ("se", "size_nw_se", {"relx": 1, "x": -8, "rely": 1, "y": -8, "width": 8, "height": 8}),
+            ("n", "sb_v_double_arrow", {"x": 10, "y": 0, "relwidth": 1, "width": -158, "height": 8}),
+            ("s", "sb_v_double_arrow", {"x": 10, "rely": 1, "y": -10, "relwidth": 1, "width": -20, "height": 10}),
+            ("w", "sb_h_double_arrow", {"x": 0, "y": 35, "width": 10, "relheight": 1, "height": -45}),
+            ("e", "sb_h_double_arrow", {"relx": 1, "x": -10, "y": 35, "width": 10, "relheight": 1, "height": -45}),
+            ("sw", "size_ne_sw", {"x": 0, "rely": 1, "y": -14, "width": 14, "height": 14}),
+            ("se", "size_nw_se", {"relx": 1, "x": -14, "rely": 1, "y": -14, "width": 14, "height": 14}),
         )
         for edge, cursor, placement in specs:
             grip_color = TITLE_BG if edge == "n" else BG
@@ -3478,6 +4103,18 @@ class AudioLibraryApp:
             grip.bind("<ButtonRelease-1>", lambda _event: setattr(self, "_resize_data", None))
             grip.lift()
             self.resize_grips.append(grip)
+        self.window_outline_frames = [
+            tk.Frame(self.root, bg=BORDER, height=1),
+            tk.Frame(self.root, bg=BORDER, width=1),
+            tk.Frame(self.root, bg=BORDER, width=1),
+            tk.Frame(self.root, bg=BORDER, height=1),
+        ]
+        self.window_outline_frames[0].place(x=0, y=0, relwidth=1)
+        self.window_outline_frames[1].place(x=0, y=0, relheight=1)
+        self.window_outline_frames[2].place(relx=1, x=-1, y=0, relheight=1)
+        self.window_outline_frames[3].place(x=0, rely=1, y=-1, relwidth=1)
+        for frame in self.window_outline_frames:
+            frame.lift()
 
     def _show_resize_grips(self, visible: bool) -> None:
         for grip in self.resize_grips:
@@ -3485,6 +4122,8 @@ class AudioLibraryApp:
                 grip.lift()
             else:
                 grip.lower()
+        for frame in self.window_outline_frames:
+            frame.lift()
 
     def _start_resize(self, event: tk.Event, edge: str) -> None:
         self._resize_data = (
@@ -3503,7 +4142,7 @@ class AudioLibraryApp:
         edge, start_x, start_y, x, y, width, height = self._resize_data
         delta_x = event.x_root - start_x
         delta_y = event.y_root - start_y
-        min_width, min_height = 920, 620
+        min_width, min_height = MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT
         if "e" in edge:
             width = max(min_width, width + delta_x)
         if "s" in edge:
@@ -3714,6 +4353,23 @@ class AudioLibraryApp:
             widget.bind("<B1-Motion>", drag)
         window.protocol("WM_DELETE_WINDOW", request_close)
         tk.Frame(window, bg=BORDER, height=1).pack(fill="x", side="top")
+        outline_frames = (
+            tk.Frame(window, bg=BORDER, height=1),
+            tk.Frame(window, bg=BORDER, width=1),
+            tk.Frame(window, bg=BORDER, width=1),
+            tk.Frame(window, bg=BORDER, height=1),
+        )
+        outline_frames[0].place(x=0, y=0, relwidth=1)
+        outline_frames[1].place(x=0, y=0, relheight=1)
+        outline_frames[2].place(relx=1, x=-1, y=0, relheight=1)
+        outline_frames[3].place(x=0, rely=1, y=-1, relwidth=1)
+
+        def lift_outline(_event=None) -> None:
+            for frame in outline_frames:
+                frame.lift()
+
+        window.bind("<Configure>", lift_outline, add="+")
+        window.after_idle(lift_outline)
 
     def _start_virtual_microphone_background(self) -> bool:
         return self._begin_virtual_microphone_start()
@@ -3853,6 +4509,69 @@ class AudioLibraryApp:
         except tk.TclError:
             pass
 
+    def _poll_audio_stream_health(self) -> None:
+        """Recover a stalled microphone callback without treating silence as failure."""
+        try:
+            if self._closing_event.is_set():
+                return
+            if self.virtual_microphone.is_running() and not self._virtual_start_in_progress:
+                healthy, reason = self.virtual_microphone.health_status()
+                if (
+                    healthy
+                    and not self.virtual_microphone.uses_kernel_streaming
+                    and not self.microphone_relay.is_running()
+                ):
+                    healthy = False
+                    reason = "Процес фізичного мікрофона зупинився"
+
+                now = time.monotonic()
+                if healthy:
+                    self._audio_health_last_reason = ""
+                    if now - self._audio_recovery_last_attempt > 8.0:
+                        self._audio_recovery_attempts = 0
+                elif (
+                    now - self._audio_recovery_last_attempt >= 5.0
+                    and self._audio_recovery_attempts < 3
+                ):
+                    self._audio_recovery_attempts += 1
+                    self._audio_recovery_last_attempt = now
+                    self._audio_health_last_reason = reason
+                    self._write_audio_routing_log(
+                        "WATCHDOG_RESTART "
+                        f"attempt={self._audio_recovery_attempts} reason={reason}"
+                    )
+                    self.status_text.set(
+                        "Відновлення потоку фізичного мікрофона…"
+                    )
+
+                    def recovery_finished(
+                        success: bool,
+                        _physical: CaptureEndpoint | None,
+                        error_text: str | None,
+                    ) -> None:
+                        if success:
+                            self._write_audio_routing_log("WATCHDOG_RECOVERED")
+                            self.status_text.set("Потік фізичного мікрофона відновлено")
+                        else:
+                            self._write_audio_routing_log(
+                                f"WATCHDOG_RECOVERY_ERROR {error_text or 'unknown'}"
+                            )
+
+                    self._begin_virtual_microphone_start(
+                        reset_existing=True,
+                        callback=recovery_finished,
+                    )
+        except Exception as error:
+            if str(error) != self._audio_health_last_reason:
+                self._audio_health_last_reason = str(error)
+                self._write_audio_routing_log(f"WATCHDOG_ERROR {error}")
+        finally:
+            try:
+                if not self._closing_event.is_set():
+                    self.root.after(1000, self._poll_audio_stream_health)
+            except tk.TclError:
+                pass
+
     def _choose_physical_microphone(self, explanation: str) -> CaptureEndpoint | None:
         try:
             microphones = list_physical_microphones()
@@ -3877,6 +4596,7 @@ class AudioLibraryApp:
         dialog.configure(bg=BG)
         dialog.transient(self.root)
         dialog.grab_set()
+        self._build_secondary_title_bar(dialog, "Вибір фізичного мікрофона")
         selected: list[CaptureEndpoint] = []
 
         LocalizedLabel(
@@ -3900,7 +4620,7 @@ class AudioLibraryApp:
             bg=PANEL,
             fg=TEXT,
             selectbackground=ACCENT,
-            selectforeground="white",
+            selectforeground=_contrast_text_color(ACCENT),
             relief="flat",
             borderwidth=0,
             font=("Segoe UI", 11),
@@ -3936,7 +4656,7 @@ class AudioLibraryApp:
 
         controls = tk.Frame(dialog, bg=BG)
         controls.pack(fill="x", padx=22, pady=16)
-        self._button(controls, "Зберегти", accept, "#0f766e").pack(side="left")
+        self._button(controls, "Зберегти", accept, ACCENT).pack(side="left")
         self._button(controls, "Скасувати", dialog.destroy, SECONDARY).pack(
             side="left", padx=8
         )
@@ -3997,7 +4717,11 @@ class AudioLibraryApp:
                         rowheight=row_height, borderwidth=0, font=("Segoe UI", 10))
         style.configure("Treeview.Heading", background=FIELD, foreground=TEXT,
                         relief="flat", font=("Segoe UI Semibold", 10))
-        style.map("Treeview", background=[("selected", ACCENT)])
+        style.map(
+            "Treeview",
+            background=[("selected", ACCENT)],
+            foreground=[("selected", _contrast_text_color(ACCENT))],
+        )
         style.configure("TScale", background=BG, troughcolor=FIELD)
         style.configure(
             "Settings.Horizontal.TProgressbar",
@@ -4111,7 +4835,6 @@ class AudioLibraryApp:
         hover_colors = {
             ACCENT: ACCENT_HOVER,
             DANGER: "#b91c1c",
-            "#0f766e": "#0d9488",
             SECONDARY: BORDER,
         }
         hover_color = hover_colors.get(color, ACCENT_HOVER)
@@ -4133,9 +4856,9 @@ class AudioLibraryApp:
             text=text,
             command=command,
             bg=color,
-            fg="white",
+            fg=_contrast_text_color(color),
             activebackground=hover_color,
-            activeforeground="white",
+            activeforeground=_contrast_text_color(hover_color),
             relief="flat",
             bd=0,
             padx=14,
@@ -4243,7 +4966,7 @@ class AudioLibraryApp:
             content,
             textvariable=error_text,
             bg=BG,
-            fg="#fca5a5",
+            fg=ERROR_TEXT,
             font=("Segoe UI", 9),
             anchor="w",
         ).pack(fill="x", pady=(5, 0))
@@ -4304,14 +5027,20 @@ class AudioLibraryApp:
 
     def _build_ui(self) -> None:
         self._build_title_bar()
-        header = tk.Frame(self.root, bg=BG, padx=18, pady=16)
+        header = tk.Frame(self.root, bg=TITLE_BG, padx=20, pady=10)
         header.pack(fill="x")
-        LocalizedLabel(header, text="AudioLib", bg=BG, fg=TEXT,
-                 font=("Segoe UI Semibold", 24)).pack(side="left")
-        LocalizedLabel(header, text="Локальна бібліотека аудіозаписів", bg=BG, fg=MUTED,
-                 font=("Segoe UI", 11)).pack(side="left", padx=14, pady=(8, 0))
-        header_actions = tk.Frame(header, bg=BG)
+        LocalizedLabel(header, text="AudioLib", bg=TITLE_BG, fg=TEXT,
+                 font=("Segoe UI", 18)).pack(side="left")
+        LocalizedLabel(header, text="Локальна бібліотека аудіозаписів", bg=TITLE_BG, fg=MUTED,
+                 font=("Segoe UI", 9)).pack(side="left", padx=12, pady=(4, 0))
+        header_actions = tk.Frame(header, bg=TITLE_BG)
         header_actions.pack(side="right")
+        self._button(
+            header_actions,
+            "Пульт",
+            self._open_remote_control,
+            ACCENT,
+        ).pack(side="left", padx=(0, 8))
         self._button(
             header_actions,
             "Налаштування",
@@ -4320,13 +5049,20 @@ class AudioLibraryApp:
             image=self.header_action_icons["settings"],
         ).pack(side="left")
 
-        body = tk.PanedWindow(self.root, orient="horizontal", bg=BORDER, sashwidth=1,
-                              sashrelief="flat", bd=0)
-        body.pack(fill="both", expand=True, padx=18, pady=(0, 12))
+        body = tk.PanedWindow(
+            self.root,
+            orient="horizontal",
+            bg=BG,
+            sashwidth=10,
+            sashrelief="flat",
+            sashcursor="sb_h_double_arrow",
+            bd=0,
+        )
+        body.pack(fill="both", expand=True, padx=20, pady=(16, 12))
         left = tk.Frame(
             body,
             bg=PANEL,
-            width=390,
+            width=280,
             highlightbackground=BORDER,
             highlightcolor=BORDER,
             highlightthickness=1,
@@ -4340,12 +5076,12 @@ class AudioLibraryApp:
             highlightthickness=1,
             bd=0,
         )
-        body.add(left, minsize=300)
+        body.add(left, minsize=240)
         body.add(right, minsize=500)
         self.body_paned = body
         self.categories_panel = left
 
-        left_top = tk.Frame(left, bg=PANEL, padx=16, pady=14)
+        left_top = tk.Frame(left, bg=PANEL, padx=12, pady=12)
         left_top.pack(fill="x")
         self.categories_header = left_top
         self.categories_title = LocalizedLabel(
@@ -4353,11 +5089,11 @@ class AudioLibraryApp:
             text="Категорії",
             bg=PANEL,
             fg=TEXT,
-            font=("Segoe UI Semibold", 16),
+            font=("Segoe UI", 13),
         )
         self.categories_title.pack(side="left")
         self.add_person_button = self._button(
-            left_top, "+ Додати", self.add_person
+            left_top, "Додати", self.add_person
         )
         self.add_person_button.pack(side="right")
         self.categories_toggle_button = self._button(
@@ -4467,21 +5203,61 @@ class AudioLibraryApp:
         self.people_canvas.bind("<Configure>", lambda e: self.people_canvas.itemconfigure(
             self.people_window, width=e.width))
         self.root.bind_all("<MouseWheel>", self._on_people_mousewheel, add="+")
-        self.root.after_idle(self._apply_categories_panel_state)
+        self.root.after_idle(self._refresh_workspace_tabs)
+
+        tabs_bar = tk.Frame(right, bg=PANEL, padx=8, pady=4)
+        self.workspace_tabs_bar = tabs_bar
+        if bool(self.app_settings.get("show_workspace_tabs", False)):
+            tabs_bar.pack(fill="x", padx=20, pady=(0, 4))
+        tabs_view = tk.Frame(tabs_bar, bg=PANEL)
+        tabs_view.pack(fill="both", expand=True)
+        self.workspace_tabs_canvas = tk.Canvas(
+            tabs_view,
+            bg=PANEL,
+            height=32,
+            highlightthickness=0,
+            bd=0,
+            xscrollincrement=40,
+        )
+        self.workspace_tabs_frame = tk.Frame(self.workspace_tabs_canvas, bg=PANEL)
+        self.workspace_tabs_window = self.workspace_tabs_canvas.create_window(
+            (0, 0), window=self.workspace_tabs_frame, anchor="nw"
+        )
+        self.workspace_tabs_frame.bind(
+            "<Configure>",
+            lambda _event: self.workspace_tabs_canvas.configure(
+                scrollregion=self.workspace_tabs_canvas.bbox("all")
+            ),
+        )
+        self.workspace_tabs_canvas.bind(
+            "<Configure>",
+            lambda event: self.workspace_tabs_canvas.itemconfigure(
+                self.workspace_tabs_window, height=event.height
+            ),
+        )
+        self.workspace_tabs_canvas.bind(
+            "<MouseWheel>",
+            lambda event: self.workspace_tabs_canvas.xview_scroll(
+                -1 if event.delta > 0 else 1, "units"
+            ),
+        )
+        self.workspace_tabs_canvas.pack(fill="x", expand=True)
+        self.workspace_tab_buttons: dict[int, tk.Widget] = {}
+        self._refresh_workspace_tabs()
 
         person_header = tk.Frame(right, bg=BG, pady=8)
-        person_header.pack(fill="x", padx=18)
+        person_header.pack(fill="x", padx=20)
         self.person_title = LocalizedLabel(person_header, text="Оберіть людину", bg=BG, fg=TEXT,
-                                     font=("Segoe UI Semibold", 22))
+                                     font=("Segoe UI", 20))
         self.person_title.pack(side="left")
         self.delete_person_button = self._button(person_header, "Видалити", self.delete_person, DANGER)
         self.edit_person_button = self._button(person_header, "Змінити", self.edit_person, SECONDARY)
         self.delete_person_button.pack(side="right", padx=(8, 0))
         self.edit_person_button.pack(side="right")
 
-        tools = tk.Frame(right, bg=BG, pady=8)
-        tools.pack(fill="x", padx=18)
-        self.add_tracks_button = self._button(tools, "+ Додати аудіо", self.add_tracks)
+        tools = tk.Frame(right, bg=BG, pady=4)
+        tools.pack(fill="x", padx=20)
+        self.add_tracks_button = self._button(tools, "Додати аудіо", self.add_tracks)
         self.add_tracks_button.grid(row=0, column=0, sticky="w")
         self.source_column_button = self._button(
             tools, "Показати оригінальну назву", self.toggle_source_column, SECONDARY
@@ -4598,12 +5374,12 @@ class AudioLibraryApp:
 
         tk.Frame(right, bg=BORDER, height=1, bd=0).pack(
             fill="x",
-            padx=18,
-            pady=(4, 0),
+            padx=20,
+            pady=(8, 0),
         )
 
         table_frame = tk.Frame(right, bg=BG)
-        table_frame.pack(fill="both", expand=True, padx=18, pady=(7, 8))
+        table_frame.pack(fill="both", expand=True, padx=20, pady=(8, 12))
         self.track_table = CustomTrackTable(
             table_frame,
             columns=tuple(self.track_heading_labels),
@@ -4656,12 +5432,12 @@ class AudioLibraryApp:
         self.track_table.bind("<Double-Button-1>", self._on_track_double_click)
 
         track_actions = tk.Frame(right, bg=BG, pady=4)
-        track_actions.pack(fill="x", padx=18, pady=(0, 8))
+        track_actions.pack(fill="x", padx=20, pady=(8, 4), before=table_frame)
         self.random_track_button = self._button(
             track_actions,
             "Випадковий запис",
             self.play_random_track,
-            "#0f766e",
+            ACCENT,
             image=self.button_action_icons["random"],
         )
         self.random_track_button.pack(side="left", padx=(0, 8))
@@ -4671,30 +5447,36 @@ class AudioLibraryApp:
             self.rename_track,
             SECONDARY,
         )
-        self.rename_track_button.pack(side="left", padx=(0, 8))
+        self.rename_track_button.pack(side="right", padx=(8, 0))
         self.delete_track_button = self._button(
             track_actions,
             "Видалити запис",
             self.delete_track,
             DANGER,
         )
-        self.delete_track_button.pack(side="left")
+        self.delete_track_button.pack(side="right")
         self.rename_track_button.configure(state="disabled")
         self.delete_track_button.configure(state="disabled")
 
-        player = tk.Frame(self.root, bg=PLAYER_BG, padx=18, pady=10)
+        player = tk.Frame(self.root, bg=PLAYER_BG, padx=24, pady=16)
         player.pack(fill="x")
+        player_meta = tk.Frame(player, bg=PLAYER_BG)
+        player_meta.pack(fill="x", pady=(0, 8))
         LocalizedLabel(player, textvariable=self.now_playing, bg=PLAYER_BG, fg=TEXT,
-                 font=("Segoe UI Semibold", 10), width=26, anchor="w").pack(side="left")
+                 font=("Segoe UI", 11), anchor="w").pack(in_=player_meta, side="left")
+        LocalizedLabel(player, textvariable=self.time_text, bg=PLAYER_BG, fg=MUTED,
+                 font=("Segoe UI", 9)).pack(in_=player_meta, side="right")
+        transport = tk.Frame(player, bg=PLAYER_BG)
+        transport.pack(fill="x")
         self.play_pause_button = self._button(
-            player, "▶", self.toggle_pause
+            transport, "▶", self.toggle_pause
         )
         self.play_pause_button.pack(side="left", padx=(4, 12))
         self._button(
-            player, "■", self.stop_playback, SECONDARY
+            transport, "■", self.stop_playback, SECONDARY
         ).pack(side="left", padx=(0, 12))
         self.progress = FlatScale(
-            player,
+            transport,
             from_=0,
             to=1,
             command=self._preview_seek,
@@ -4709,12 +5491,10 @@ class AudioLibraryApp:
             "<ButtonPress-1>", lambda _: setattr(self, "seeking", True), add="+"
         )
         self.progress.bind("<ButtonRelease-1>", self._commit_seek, add="+")
-        LocalizedLabel(player, textvariable=self.time_text, bg=PLAYER_BG, fg=MUTED,
-                 font=("Segoe UI Semibold", 9), width=12).pack(side="left", padx=10)
         self.volume_icon = self._make_volume_icon()
-        LocalizedLabel(player, image=self.volume_icon, bg=PLAYER_BG, bd=0).pack(side="left")
+        LocalizedLabel(transport, image=self.volume_icon, bg=PLAYER_BG, bd=0).pack(side="left", padx=(16, 0))
         self.volume_scale = FlatScale(
-            player,
+            transport,
             from_=0,
             to=1000,
             command=self._set_volume,
@@ -4727,6 +5507,870 @@ class AudioLibraryApp:
         )
         self.volume_scale.set(self.volume_value)
         self.volume_scale.pack(side="left", padx=(5, 0))
+
+    def _refresh_workspace_tabs(self) -> None:
+        if not hasattr(self, "workspace_tabs_frame"):
+            return
+        show_tabs = bool(self.app_settings.get("show_workspace_tabs", False))
+        if hasattr(self, "workspace_tabs_bar"):
+            if show_tabs and not self.workspace_tabs_bar.winfo_manager():
+                self.workspace_tabs_bar.pack(fill="x", padx=20, pady=(0, 4))
+            elif not show_tabs and self.workspace_tabs_bar.winfo_manager():
+                self.workspace_tabs_bar.pack_forget()
+        if not show_tabs:
+            return
+        for widget in self.workspace_tabs_frame.winfo_children():
+            widget.destroy()
+        self.workspace_tab_buttons.clear()
+        counts = self.store.track_counts_by_person()
+        valid_tabs: list[int] = []
+        for person_id in self.workspace_open_tabs:
+            if person_id == FAVORITES_PERSON_ID or self.store.get_person(person_id):
+                if person_id not in valid_tabs:
+                    valid_tabs.append(person_id)
+        self.workspace_open_tabs = valid_tabs
+        for person_id in self.workspace_open_tabs:
+            if person_id == FAVORITES_PERSON_ID:
+                name = "Favorites"
+                count = self.store.favorite_count()
+            else:
+                person = self.store.get_person(person_id)
+                if person is None:
+                    continue
+                name = person.name
+                count = counts.get(person_id, 0)
+            selected = person_id == self.selected_person_id
+            tab = WorkspaceTab(
+                self.workspace_tabs_frame,
+                f"{name}  {count}",
+                lambda pid=person_id: self.select_person(pid),
+                lambda pid=person_id: self._close_workspace_tab(pid),
+                active=selected,
+            )
+            tab.pack(side="left", padx=(0, 6), pady=2)
+            self.workspace_tab_buttons[person_id] = tab
+
+    def _close_workspace_tab(self, person_id: int) -> None:
+        if person_id not in self.workspace_open_tabs:
+            return
+        tab_index = self.workspace_open_tabs.index(person_id)
+        self.workspace_open_tabs.remove(person_id)
+        if person_id != self.selected_person_id:
+            self._refresh_workspace_tabs()
+            return
+        if self.workspace_open_tabs:
+            next_index = min(tab_index, len(self.workspace_open_tabs) - 1)
+            self.select_person(self.workspace_open_tabs[next_index])
+            return
+        self.select_person(FAVORITES_PERSON_ID)
+
+    def _remote_color_values(self) -> dict[str, tuple[str, str]]:
+        return {"Графітний": (SECONDARY, BORDER), **ACCENT_PRESETS}
+
+    def _remote_customizations(self) -> dict[str, dict[str, str]]:
+        value = self.app_settings.get("remote_button_customizations")
+        if not isinstance(value, dict):
+            value = {}
+            self.app_settings["remote_button_customizations"] = value
+        return value
+
+    def _remote_slots(self) -> list[dict[str, object] | None]:
+        value = self.app_settings.get("remote_slots")
+        if not isinstance(value, list):
+            value = []
+        slots: list[dict[str, object] | None] = []
+        for item in value[:FAVORITES_LIMIT]:
+            slots.append(item if isinstance(item, dict) else None)
+        slots.extend([None] * (FAVORITES_LIMIT - len(slots)))
+        self.app_settings["remote_slots"] = slots
+        return slots
+
+    def _all_remote_tracks(self) -> list[tuple[object, str]]:
+        result: list[tuple[object, str]] = []
+        for person in self.store.list_people():
+            for track in self.store.list_tracks(person.id):
+                result.append((track, f"{person.name} — {track.title}"))
+        return result
+
+    def _open_remote_control(self) -> None:
+        """Show Favorites as a compact grid of configurable launch buttons."""
+        if self.remote_window is not None:
+            try:
+                if self.remote_window.winfo_exists():
+                    self._render_remote_buttons()
+                    self.remote_window.deiconify()
+                    self._set_toplevel_topmost(self.remote_window, True)
+                    self.remote_window.lift()
+                    return
+            except tk.TclError:
+                self.remote_window = None
+
+        window = tk.Toplevel(self.root)
+        window.title("AudioLib — Пульт")
+        window.geometry("500x780+40+40")
+        window.minsize(460, 760)
+        window.configure(bg=BG)
+        window._audiolib_close_callback = window.withdraw
+        self._build_secondary_title_bar(window, "Пульт")
+        self._set_toplevel_topmost(window, True)
+
+        def keep_remote_visible(_event=None) -> None:
+            try:
+                if window.winfo_exists() and window.state() != "withdrawn":
+                    settings_visible = (
+                        self.remote_settings_window is not None
+                        and self.remote_settings_window.winfo_exists()
+                        and self.remote_settings_window.winfo_viewable()
+                    )
+                    if settings_visible:
+                        self._set_toplevel_topmost(window, False)
+                        return
+                    self._set_toplevel_topmost(window, True)
+                    window.lift()
+                    self._ensure_auxiliary_taskbar_presence(window)
+            except tk.TclError:
+                pass
+
+        window.bind(
+            "<Map>",
+            lambda _event: window.after_idle(keep_remote_visible),
+            add="+",
+        )
+        window.bind(
+            "<FocusOut>",
+            lambda _event: window.after(50, keep_remote_visible),
+            add="+",
+        )
+        window.after(50, keep_remote_visible)
+        window.after(250, keep_remote_visible)
+        self.remote_window = window
+
+        header = tk.Frame(window, bg=TITLE_BG, padx=24, pady=16)
+        header.pack(fill="x")
+        header_text = tk.Frame(header, bg=TITLE_BG)
+        header_text.pack(side="left", fill="x", expand=True)
+        LocalizedLabel(
+            header_text,
+            text="Пульт",
+            bg=TITLE_BG,
+            fg=TEXT,
+            font=("Segoe UI", 17),
+        ).pack(anchor="w")
+        self._button(
+            header,
+            "Налаштувати кнопки",
+            self._open_remote_button_settings,
+            SECONDARY,
+        ).pack(side="right", padx=(16, 0))
+
+        controls = tk.Frame(window, bg=BG, padx=24, pady=16)
+        controls.pack(fill="x")
+        LocalizedLabel(
+            controls,
+            text="Канал запуску",
+            bg=BG,
+            fg=MUTED,
+            font=("Segoe UI", 9),
+        ).pack(side="left")
+        mode_buttons = tk.Frame(controls, bg=BG)
+        mode_buttons.pack(side="left", padx=(16, 0))
+        self.remote_output_buttons.clear()
+        for target, label in (("speaker", "Динаміки"), ("microphone", "Мікрофон")):
+            button = self._button(
+                mode_buttons,
+                label,
+                lambda value=target: self._set_remote_output_target(value),
+                ACCENT if target == self.remote_output_target else SECONDARY,
+            )
+            button.pack(side="left", padx=(0, 8))
+            self.remote_output_buttons[target] = button
+        self._button(
+            controls,
+            "Стоп",
+            self._stop_remote_audio,
+            SECONDARY,
+        ).pack(side="right")
+        self.remote_count_label = LocalizedLabel(
+            controls,
+            text="",
+            bg=BG,
+            fg=MUTED,
+            font=("Segoe UI", 9),
+        )
+        self.remote_count_label.pack(side="right", padx=(0, 16))
+
+        self.remote_favorites_frame = tk.Frame(window, bg=BG, padx=20, pady=8)
+        self.remote_favorites_frame.pack(fill="both", expand=True)
+        for column in range(3):
+            self.remote_favorites_frame.grid_columnconfigure(
+                column, weight=0, minsize=116, uniform="favorite"
+            )
+        for row in range(5):
+            self.remote_favorites_frame.grid_rowconfigure(
+                row, weight=0, minsize=116, uniform="favorite"
+            )
+        self.remote_favorites_frame.grid_anchor("center")
+        self._render_remote_buttons()
+
+    def _render_remote_buttons(self) -> None:
+        frame = self.remote_favorites_frame
+        if frame is None:
+            return
+        try:
+            if not frame.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        for widget in frame.winfo_children():
+            widget.destroy()
+        self.remote_track_buttons.clear()
+        slots = self._remote_slots()
+        configured_count = sum(1 for slot in slots if slot is not None)
+        if self.remote_count_label is not None:
+            self.remote_count_label.configure(text=f"{configured_count}/{FAVORITES_LIMIT}")
+        hotkeys = self.store.favorite_hotkeys()
+        colors = self._remote_color_values()
+        for index in range(FAVORITES_LIMIT):
+            slot = slots[index]
+            track = None
+            if slot is not None:
+                try:
+                    track = self.store.get_track(int(slot.get("track_id")))
+                except (TypeError, ValueError):
+                    track = None
+            if track is None:
+                title = ""
+                hotkey = ""
+                color, hover_color = FIELD, HOVER
+                command = lambda slot_index=index: self._open_remote_button_settings(
+                    slot_index
+                )
+            else:
+                custom_label = str(slot.get("label", "")).strip()
+                title = custom_label or track.title
+                hotkey = display_hotkey(hotkeys.get(track.id))
+                color_name = str(slot.get("color", "Графітний"))
+                if color_name == "Власний":
+                    color = _valid_hex_color(slot.get("custom_color", "#a34f0d"))
+                    hover_color = _darken_hex_color(color)
+                else:
+                    color, hover_color = colors.get(
+                        color_name, colors["Графітний"]
+                    )
+                command = lambda track_id=track.id: self._play_remote_favorite(track_id)
+            button = RemoteFavoriteButton(
+                frame,
+                title=title,
+                hotkey=hotkey,
+                command=command,
+                color=color,
+                hover_color=hover_color,
+            )
+            button.grid(
+                row=index // 3,
+                column=index % 3,
+                padx=6,
+                pady=6,
+            )
+            if track is not None:
+                self.remote_track_buttons.setdefault(track.id, []).append(button)
+
+    def _flash_remote_track(self, track_id: int) -> None:
+        window = self.remote_window
+        if window is None:
+            return
+        try:
+            if not window.winfo_exists() or not window.winfo_viewable():
+                return
+        except tk.TclError:
+            return
+        for button in self.remote_track_buttons.get(track_id, []):
+            try:
+                if button.winfo_exists():
+                    button.flash()
+            except tk.TclError:
+                continue
+
+    def _open_remote_button_settings(self, slot_index: int | None = None) -> None:
+        if self.remote_settings_window is not None:
+            try:
+                if self.remote_settings_window.winfo_exists():
+                    self.remote_settings_window.lift()
+                    selector = getattr(self, "_remote_settings_select_slot", None)
+                    if slot_index is not None and callable(selector):
+                        selector(slot_index)
+                    return
+            except tk.TclError:
+                self.remote_settings_window = None
+
+        track_options = self._all_remote_tracks()
+        favorite_tracks = self.store.list_favorites()
+        favorite_options = []
+        for track in favorite_tracks:
+            person = self.store.get_person(track.person_id)
+            prefix = person.name if person is not None else "Favorites"
+            favorite_options.append((track, f"{prefix} — {track.title}"))
+
+        window = tk.Toplevel(self.remote_window or self.root)
+        window.title("AudioLib — Налаштування кнопок")
+        window.geometry("980x640+80+80")
+        window.minsize(900, 600)
+        window.configure(bg=BG)
+        self.remote_settings_window = window
+
+        def close_window() -> None:
+            self.remote_settings_window = None
+            self._remote_settings_select_slot = None
+            window.destroy()
+
+            def restore_remote_topmost() -> None:
+                remote = self.remote_window
+                if remote is None:
+                    return
+                try:
+                    if remote.winfo_exists() and remote.state() != "withdrawn":
+                        self._set_toplevel_topmost(remote, True)
+                        remote.lift()
+                        self._ensure_auxiliary_taskbar_presence(remote)
+                except tk.TclError:
+                    pass
+
+            restore_remote_topmost()
+            self.root.after(50, restore_remote_topmost)
+            self.root.after(250, restore_remote_topmost)
+
+        window._audiolib_close_callback = close_window
+        self._build_secondary_title_bar(window, "Налаштування кнопок")
+        LocalizedLabel(
+            window,
+            text="Налаштування пульта",
+            bg=BG,
+            fg=TEXT,
+            font=("Segoe UI", 18),
+        ).pack(anchor="w", padx=24, pady=(20, 4))
+        LocalizedLabel(
+            window,
+            text="Оберіть слот, запис і його оформлення",
+            bg=BG,
+            fg=MUTED,
+            font=("Segoe UI", 10),
+        ).pack(anchor="w", padx=24, pady=(0, 16))
+
+        actions = tk.Frame(window, bg=BG, padx=24, pady=16)
+        actions.pack(side="bottom", fill="x")
+
+        content = tk.Frame(window, bg=BG)
+        content.pack(fill="both", expand=True, padx=24, pady=(0, 8))
+
+        slots_panel = tk.Frame(
+            content,
+            bg=PANEL,
+            padx=16,
+            pady=16,
+            highlightbackground=BORDER,
+            highlightthickness=1,
+        )
+        slots_panel.pack(side="left", fill="y")
+        LocalizedLabel(
+            slots_panel,
+            text="Кнопки",
+            bg=PANEL,
+            fg=TEXT,
+            font=("Segoe UI Semibold", 11),
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 12))
+        slot_buttons: dict[int, tk.Button] = {}
+        selected_slot = max(0, min(FAVORITES_LIMIT - 1, slot_index or 0))
+        selected_track_id: int | None = None
+
+        editor_shell = tk.Frame(
+            content,
+            bg=PANEL,
+            highlightbackground=BORDER,
+            highlightthickness=1,
+        )
+        editor_shell.pack(side="left", fill="both", expand=True, padx=(16, 0))
+        editor_canvas = tk.Canvas(
+            editor_shell,
+            bg=PANEL,
+            highlightthickness=0,
+            bd=0,
+        )
+        editor_scroll = ttk.Scrollbar(
+            editor_shell,
+            orient="vertical",
+            command=editor_canvas.yview,
+            style="AudioLib.Vertical.TScrollbar",
+        )
+        editor = tk.Frame(editor_canvas, bg=PANEL, padx=16, pady=16)
+        editor_window = editor_canvas.create_window(
+            (0, 0), window=editor, anchor="nw"
+        )
+        editor_canvas.configure(yscrollcommand=editor_scroll.set)
+        editor_scroll.pack(side="right", fill="y", pady=8)
+        editor_canvas.pack(side="left", fill="both", expand=True)
+        editor.bind(
+            "<Configure>",
+            lambda _event: editor_canvas.configure(
+                scrollregion=editor_canvas.bbox("all")
+            ),
+        )
+        editor_canvas.bind(
+            "<Configure>",
+            lambda event: editor_canvas.itemconfigure(
+                editor_window, width=event.width
+            ),
+        )
+        editor_canvas.bind(
+            "<MouseWheel>",
+            lambda event: editor_canvas.yview_scroll(
+                -1 if event.delta > 0 else 1, "units"
+            ),
+        )
+
+        def scroll_remote_editor(event: tk.Event):
+            if isinstance(event.widget, tk.Listbox):
+                return None
+            editor_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+            return "break"
+
+        window.bind("<MouseWheel>", scroll_remote_editor, add="+")
+        list_area = tk.Frame(editor, bg=PANEL)
+        list_area.pack(fill="both", expand=True)
+        all_search_var = tk.StringVar()
+        favorite_search_var = tk.StringVar()
+
+        def build_track_column(
+            parent: tk.Misc,
+            title: str,
+            search_variable: tk.StringVar,
+        ) -> tuple[tk.Frame, tk.Listbox]:
+            column = tk.Frame(parent, bg=PANEL)
+            LocalizedLabel(
+                column,
+                text=title,
+                bg=PANEL,
+                fg=TEXT,
+                font=("Segoe UI Semibold", 10),
+            ).pack(anchor="w", pady=(0, 6))
+            search = tk.Entry(
+                column,
+                textvariable=search_variable,
+                bg=FIELD,
+                fg=TEXT,
+                insertbackground=TEXT,
+                relief="flat",
+                bd=0,
+                font=("Segoe UI", 9),
+            )
+            search.pack(fill="x", ipady=6, pady=(0, 8))
+            placeholder = tr("Пошук")
+            search_variable.set(placeholder)
+            search.configure(fg=PLACEHOLDER)
+
+            def focus_search(_event=None) -> None:
+                if search_variable.get() == placeholder:
+                    search_variable.set("")
+                search.configure(fg=TEXT)
+
+            def blur_search(_event=None) -> None:
+                if not search_variable.get().strip():
+                    search_variable.set(placeholder)
+                    search.configure(fg=PLACEHOLDER)
+
+            search.bind("<FocusIn>", focus_search)
+            search.bind("<FocusOut>", blur_search)
+            body = tk.Frame(column, bg=PANEL)
+            body.pack(fill="both", expand=True)
+            listbox = tk.Listbox(
+                body,
+                bg=FIELD,
+                fg=TEXT,
+                selectbackground=ACCENT,
+                selectforeground=_contrast_text_color(ACCENT),
+                activestyle="none",
+                relief="flat",
+                bd=0,
+                highlightthickness=1,
+                highlightbackground=BORDER,
+                font=("Segoe UI", 9),
+                exportselection=False,
+            )
+            scrollbar = ttk.Scrollbar(
+                body,
+                orient="vertical",
+                command=listbox.yview,
+                style="AudioLib.Vertical.TScrollbar",
+            )
+            listbox.configure(yscrollcommand=scrollbar.set)
+            scrollbar.pack(side="right", fill="y")
+            listbox.pack(side="left", fill="both", expand=True)
+            return column, listbox
+
+        all_column, track_list = build_track_column(
+            list_area, "Усі записи", all_search_var
+        )
+        all_column.pack(side="left", fill="both", expand=True)
+        tk.Frame(list_area, bg=BORDER, width=1).pack(
+            side="left", fill="y", padx=10
+        )
+        favorite_column, favorite_list = build_track_column(
+            list_area, "Favorites", favorite_search_var
+        )
+        favorite_column.pack(side="left", fill="both", expand=True)
+
+        visible_tracks: list[object] = []
+        visible_favorites: list[object] = []
+
+        def refill_list(
+            listbox: tk.Listbox,
+            source: list[tuple[object, str]],
+            query: str,
+            target: list[object],
+        ) -> None:
+            target.clear()
+            listbox.delete(0, "end")
+            normalized = query.strip().casefold()
+            for track, display_name in source:
+                if normalized and normalized not in display_name.casefold():
+                    continue
+                target.append(track)
+                listbox.insert("end", display_name)
+
+        def refresh_all_tracks(*_args) -> None:
+            query = all_search_var.get()
+            refill_list(
+                track_list,
+                track_options,
+                "" if query == tr("Пошук") else query,
+                visible_tracks,
+            )
+
+        def refresh_favorite_tracks(*_args) -> None:
+            query = favorite_search_var.get()
+            refill_list(
+                favorite_list,
+                favorite_options,
+                "" if query == tr("Пошук") else query,
+                visible_favorites,
+            )
+
+        all_search_var.trace_add("write", refresh_all_tracks)
+        favorite_search_var.trace_add("write", refresh_favorite_tracks)
+        refresh_all_tracks()
+        refresh_favorite_tracks()
+
+        label_var = tk.StringVar()
+        color_var = tk.StringVar(value="Графітний")
+        custom_color_var = tk.StringVar(value="#a34f0d")
+        fields = tk.Frame(editor, bg=PANEL)
+        fields.pack(fill="x", pady=(14, 0))
+        LocalizedLabel(
+            fields,
+            text="Назва кнопки",
+            bg=PANEL,
+            fg=MUTED,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w")
+        label_entry = tk.Entry(
+            fields,
+            textvariable=label_var,
+            bg=FIELD,
+            fg=TEXT,
+            insertbackground=TEXT,
+            relief="flat",
+            bd=0,
+            font=("Segoe UI", 11),
+        )
+        label_entry.pack(fill="x", ipady=7, pady=(5, 12))
+        LocalizedLabel(
+            fields,
+            text="Колір кнопки",
+            bg=PANEL,
+            fg=MUTED,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(0, 8))
+        colors_frame = tk.Frame(fields, bg=PANEL)
+        colors_frame.pack(fill="x")
+        color_buttons: dict[str, tk.Button] = {}
+
+        def refresh_color_buttons() -> None:
+            selected = color_var.get()
+            for name, button in color_buttons.items():
+                button.configure(
+                    relief="solid" if name == selected else "flat",
+                    bd=2 if name == selected else 0,
+                )
+            custom_button = color_buttons.get("Власний")
+            if custom_button is not None:
+                custom = _valid_hex_color(custom_color_var.get())
+                custom_button.configure(
+                    bg=custom,
+                    fg=_contrast_text_color(custom),
+                    activebackground=_darken_hex_color(custom),
+                    activeforeground=_contrast_text_color(
+                        _darken_hex_color(custom)
+                    ),
+                )
+
+        def choose_custom_button_color() -> None:
+            _rgb, selected = colorchooser.askcolor(
+                color=_valid_hex_color(custom_color_var.get()),
+                title=tr("Власний колір кнопки"),
+                parent=window,
+            )
+            if selected:
+                custom_color_var.set(_valid_hex_color(selected))
+                color_var.set("Власний")
+                refresh_color_buttons()
+
+        for index, (name, (color, hover)) in enumerate(
+            self._remote_color_values().items()
+        ):
+            button = tk.Button(
+                colors_frame,
+                text=name,
+                command=lambda value=name: (
+                    color_var.set(value),
+                    refresh_color_buttons(),
+                ),
+                bg=color,
+                fg=_contrast_text_color(color),
+                activebackground=hover,
+                activeforeground=_contrast_text_color(hover),
+                relief="flat",
+                bd=0,
+                font=("Segoe UI", 9),
+                cursor="hand2",
+            )
+            button.grid(
+                row=index // 3,
+                column=index % 3,
+                sticky="ew",
+                padx=7,
+                pady=7,
+                ipady=5,
+            )
+            colors_frame.grid_columnconfigure(index % 3, weight=1)
+            color_buttons[name] = button
+        custom_index = len(color_buttons)
+        custom_button = tk.Button(
+            colors_frame,
+            text="Власний…",
+            command=choose_custom_button_color,
+            bg=_valid_hex_color(custom_color_var.get()),
+            fg=_contrast_text_color(_valid_hex_color(custom_color_var.get())),
+            activebackground=_darken_hex_color(custom_color_var.get()),
+            activeforeground=_contrast_text_color(
+                _darken_hex_color(custom_color_var.get())
+            ),
+            relief="flat",
+            bd=0,
+            font=("Segoe UI", 9),
+            cursor="hand2",
+        )
+        custom_button.grid(
+            row=custom_index // 3,
+            column=custom_index % 3,
+            sticky="ew",
+            padx=7,
+            pady=7,
+            ipady=5,
+        )
+        colors_frame.grid_columnconfigure(custom_index % 3, weight=1)
+        color_buttons["Власний"] = custom_button
+
+        def refresh_slot_buttons() -> None:
+            slots = self._remote_slots()
+            for index, button in slot_buttons.items():
+                assigned = slots[index] is not None
+                button.configure(
+                    bg=ACCENT if index == selected_slot else SECONDARY if assigned else FIELD,
+                    activebackground=ACCENT_HOVER if index == selected_slot else HOVER,
+                    relief="solid",
+                    bd=1,
+                    highlightthickness=0,
+                )
+
+        def load_slot(index: int) -> None:
+            nonlocal selected_slot, selected_track_id
+            selected_slot = max(0, min(FAVORITES_LIMIT - 1, index))
+            slot = self._remote_slots()[selected_slot]
+            track_list.selection_clear(0, "end")
+            favorite_list.selection_clear(0, "end")
+            selected_track_id = None
+            if slot is None:
+                label_var.set("")
+                color_var.set("Графітний")
+                custom_color_var.set("#a34f0d")
+            else:
+                try:
+                    selected_track_id = int(slot.get("track_id"))
+                except (TypeError, ValueError):
+                    selected_track_id = None
+                track = self.store.get_track(selected_track_id) if selected_track_id else None
+                label_var.set(str(slot.get("label", "")) or (track.title if track else ""))
+                color_var.set(str(slot.get("color", "Графітний")))
+                custom_color_var.set(
+                    _valid_hex_color(slot.get("custom_color", "#a34f0d"))
+                )
+                all_index = next(
+                    (
+                        position
+                        for position, item in enumerate(visible_tracks)
+                        if item.id == selected_track_id
+                    ),
+                    None,
+                )
+                favorite_index = next(
+                    (
+                        position
+                        for position, item in enumerate(visible_favorites)
+                        if item.id == selected_track_id
+                    ),
+                    None,
+                )
+                if all_index is not None:
+                    track_list.selection_set(all_index)
+                    track_list.see(all_index)
+                if favorite_index is not None:
+                    favorite_list.selection_set(favorite_index)
+                    favorite_list.see(favorite_index)
+            refresh_color_buttons()
+            refresh_slot_buttons()
+
+        self._remote_settings_select_slot = load_slot
+
+        for index in range(FAVORITES_LIMIT):
+            button = tk.Button(
+                slots_panel,
+                text=str(index + 1),
+                command=lambda value=index: load_slot(value),
+                bg=FIELD,
+                fg=TEXT,
+                activeforeground=_contrast_text_color(ACCENT),
+                relief="solid",
+                bd=1,
+                width=4,
+                height=2,
+                cursor="hand2",
+                font=("Segoe UI Semibold", 9),
+            )
+            button.grid(
+                row=1 + index // 3,
+                column=index % 3,
+                padx=4,
+                pady=4,
+            )
+            slot_buttons[index] = button
+
+        def select_track(
+            listbox: tk.Listbox,
+            visible: list[object],
+            other_listbox: tk.Listbox,
+        ) -> None:
+            nonlocal selected_track_id
+            selection = listbox.curselection()
+            if not selection:
+                return
+            index = int(selection[0])
+            if index >= len(visible):
+                return
+            track = visible[index]
+            other_listbox.selection_clear(0, "end")
+            previous = self.store.get_track(selected_track_id) if selected_track_id else None
+            if not label_var.get().strip() or (
+                previous is not None and label_var.get().strip() == previous.title
+            ):
+                label_var.set(track.title)
+            selected_track_id = track.id
+
+        def save_selected() -> None:
+            if selected_track_id is None:
+                _showwarning(
+                    "Налаштування пульта",
+                    "Оберіть аудіозапис для цієї кнопки.",
+                    parent=window,
+                )
+                return
+            track = self.store.get_track(selected_track_id)
+            if track is None:
+                return
+            label = label_var.get().strip()[:64]
+            if not label:
+                label = track.title
+            stored_label = "" if label == track.title else label
+            self._remote_slots()[selected_slot] = {
+                "track_id": track.id,
+                "label": stored_label,
+                "color": color_var.get(),
+                "custom_color": _valid_hex_color(custom_color_var.get()),
+            }
+            self._schedule_volume_save()
+            self._render_remote_buttons()
+            refresh_slot_buttons()
+
+        def reset_selected() -> None:
+            nonlocal selected_track_id
+            self._remote_slots()[selected_slot] = None
+            selected_track_id = None
+            self._schedule_volume_save()
+            self._render_remote_buttons()
+            track_list.selection_clear(0, "end")
+            favorite_list.selection_clear(0, "end")
+            label_var.set("")
+            color_var.set("Графітний")
+            custom_color_var.set("#a34f0d")
+            refresh_color_buttons()
+            refresh_slot_buttons()
+
+        track_list.bind(
+            "<<ListboxSelect>>",
+            lambda _event: select_track(track_list, visible_tracks, favorite_list),
+        )
+        favorite_list.bind(
+            "<<ListboxSelect>>",
+            lambda _event: select_track(
+                favorite_list, visible_favorites, track_list
+            ),
+        )
+        load_slot(selected_slot)
+
+        self._button(actions, "Зберегти", save_selected, ACCENT).pack(side="right")
+        self._button(actions, "Закрити", close_window, SECONDARY).pack(
+            side="right", padx=(0, 8)
+        )
+        self._button(actions, "Очистити кнопку", reset_selected, SECONDARY).pack(side="left")
+        window.bind("<Escape>", lambda _event: close_window())
+        remote = self.remote_window
+        if remote is not None:
+            try:
+                if remote.winfo_exists():
+                    self._set_toplevel_topmost(remote, False)
+            except tk.TclError:
+                pass
+        window.transient(self.root)
+        window.lift()
+
+    def _set_remote_output_target(self, target: str) -> None:
+        if target not in {"speaker", "microphone"}:
+            return
+        self.remote_output_target = target
+        for value, button in self.remote_output_buttons.items():
+            active = value == target
+            button.configure(
+                color=ACCENT if active else SECONDARY,
+                hover_color=ACCENT_HOVER if active else BORDER,
+            )
+
+    def _play_remote_favorite(self, track_id: int) -> None:
+        if self.remote_output_target == "microphone":
+            self.play_track_in_microphone(track_id)
+            return
+        self.play_track_in_speaker(track_id)
+
+    def _stop_remote_audio(self) -> None:
+        self.stop_playback()
+        self.stop_virtual_microphone_sound()
 
     def _on_people_mousewheel(self, event: tk.Event) -> None:
         pointer_x, pointer_y = self.root.winfo_pointerxy()
@@ -4770,8 +6414,8 @@ class AudioLibraryApp:
                 before=self.people_canvas,
             )
             self.people_canvas.pack_configure(padx=(10, 0))
-            target_width = max(300, self._categories_expanded_width)
-            self.body_paned.paneconfigure(self.categories_panel, minsize=300)
+            target_width = max(280, self._categories_expanded_width)
+            self.body_paned.paneconfigure(self.categories_panel, minsize=280)
 
         try:
             self.body_paned.sash_place(0, target_width, 0)
@@ -4857,7 +6501,7 @@ class AudioLibraryApp:
         cached = self._photo_cache.get(cache_key)
         if cached is not None:
             return cached
-        image = Image.new("RGB", (size, size), "#4c1d95")
+        image = Image.new("RGB", (size, size), ACCENT)
         draw = ImageDraw.Draw(image)
         initials = "".join(part[0] for part in name.split()[:2]).upper() or "?"
         try:
@@ -4865,7 +6509,12 @@ class AudioLibraryApp:
         except OSError:
             font = ImageFont.load_default()
         box = draw.textbbox((0, 0), initials, font=font)
-        draw.text(((size - box[2]) / 2, (size - box[3]) / 2 - 2), initials, fill="white", font=font)
+        draw.text(
+            ((size - box[2]) / 2, (size - box[3]) / 2 - 2),
+            initials,
+            fill=_contrast_text_color(ACCENT),
+            font=font,
+        )
         result = self._circular_photo(image, size)
         self._remember_photo(cache_key, result)
         return result
@@ -4895,31 +6544,41 @@ class AudioLibraryApp:
         return self._placeholder(person.name, size)
 
     def _favorites_photo(self, size: int = 92) -> ImageTk.PhotoImage:
-        asset_roots = [self.root_dir / "assets"]
-        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            asset_roots.insert(0, Path(sys._MEIPASS) / "assets")
-        for assets in asset_roots:
-            path = assets / "favorites_icon.png"
-            try:
-                if path.exists():
-                    stat = path.stat()
-                    cache_key = (
-                        "favorites",
-                        str(path),
-                        stat.st_mtime_ns,
-                        stat.st_size,
-                        size,
-                    )
-                    cached = self._photo_cache.get(cache_key)
-                    if cached is not None:
-                        return cached
-                    with Image.open(path) as source:
-                        result = self._circular_photo(source, size)
-                    self._remember_photo(cache_key, result)
-                    return result
-            except OSError:
-                continue
-        return self._placeholder("★", size)
+        cache_key = ("favorites-bookmark", size, CARD, FIELD, ACCENT)
+        cached = self._photo_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        scale = 4
+        canvas = Image.new("RGBA", (size * scale, size * scale), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(canvas)
+        margin = 2 * scale
+        draw.ellipse(
+            (margin, margin, size * scale - margin, size * scale - margin),
+            fill=FIELD,
+            outline=BORDER,
+            width=scale,
+        )
+        center_x = size * scale / 2
+        # Match the optical centering used by table/tile bookmark controls.
+        center_y = size * scale / 2 + scale
+        half_width = size * 0.16 * scale
+        half_height = size * 0.24 * scale
+        left = int(center_x - half_width)
+        right = int(center_x + half_width)
+        top = int(center_y - half_height)
+        bottom = int(center_y + half_height)
+        notch = int(center_y + size * 0.08 * scale)
+        draw.line(
+            [(left, bottom), (left, top), (right, top), (right, bottom),
+             (int(center_x), notch), (left, bottom)],
+            fill=ACCENT,
+            width=max(scale, int(size * 0.035 * scale)),
+            joint="curve",
+        )
+        canvas = canvas.resize((size, size), Image.Resampling.LANCZOS)
+        result = ImageTk.PhotoImage(canvas)
+        self._remember_photo(cache_key, result)
+        return result
 
     def refresh_people(self) -> None:
         for widget in self.people_frame.winfo_children():
@@ -4929,15 +6588,15 @@ class AudioLibraryApp:
         favorites_selected = self.selected_person_id == FAVORITES_PERSON_ID
         photo_size = int(self.app_settings.get("photo_size", 92))
         density = str(self.app_settings.get("list_density", "comfortable"))
-        card_padding = {"compact": 5, "comfortable": 8, "spacious": 11}.get(
+        card_padding = {"compact": 4, "comfortable": 8, "spacious": 12}.get(
             density, 8
         )
-        card_gap = {"compact": 2, "comfortable": 4, "spacious": 7}.get(
+        card_gap = {"compact": 4, "comfortable": 8, "spacious": 12}.get(
             density, 4
         )
         favorites_card = tk.Frame(
             self.people_frame,
-            bg=ACCENT if favorites_selected else FAVORITES_BG,
+            bg=FAVORITES_SELECTED_BG if favorites_selected else FAVORITES_BG,
             padx=8,
             pady=card_padding,
             cursor="hand2",
@@ -4957,10 +6616,10 @@ class AudioLibraryApp:
         )
         favorite_name_label = LocalizedLabel(
             favorites_card,
-            text="★ Favorites",
+            text="Favorites",
             bg=favorites_card["bg"],
-            fg="#ffffff" if favorites_selected else FAVORITES_TEXT,
-            font=("Segoe UI Semibold", 11),
+            fg=FAVORITES_TEXT,
+            font=("Segoe UI", 11),
             wraplength=180,
             justify="left",
             cursor="hand2",
@@ -4971,8 +6630,8 @@ class AudioLibraryApp:
             favorites_card,
             text=f"{self.store.favorite_count()}/{FAVORITES_LIMIT}",
             bg=favorites_card["bg"],
-            fg="#ffffff" if favorites_selected else FAVORITES_MUTED,
-            font=("Segoe UI Semibold", 11),
+            fg=ACCENT if favorites_selected else FAVORITES_MUTED,
+            font=("Segoe UI", 10),
             cursor="hand2",
         )
         if not self.categories_collapsed:
@@ -5000,7 +6659,7 @@ class AudioLibraryApp:
                      pady=30, font=("Segoe UI", 11)).pack(fill="x")
         for person in people:
             selected = person.id == self.selected_person_id
-            card = tk.Frame(self.people_frame, bg=ACCENT if selected else CARD, padx=8, pady=card_padding,
+            card = tk.Frame(self.people_frame, bg=HOVER if selected else CARD, padx=8, pady=card_padding,
                             cursor="hand2")
             card.pack(fill="x", padx=6, pady=card_gap)
             photo = self._person_photo(person, photo_size)
@@ -5014,14 +6673,14 @@ class AudioLibraryApp:
                 card,
                 text=str(track_counts.get(person.id, 0)),
                 bg=card["bg"],
-                fg=TEXT if selected else MUTED,
-                font=("Segoe UI Semibold", 11),
+                fg=ACCENT if selected else MUTED,
+                font=("Segoe UI", 10),
                 cursor="hand2",
             )
             if not self.categories_collapsed:
                 count_label.pack(side="right", padx=(8, 4))
             name_label = LocalizedLabel(card, text=person.name, bg=card["bg"], fg=TEXT,
-                                  font=("Segoe UI Semibold", 11), wraplength=180, justify="left",
+                                  font=("Segoe UI", 11), wraplength=180, justify="left",
                                   cursor="hand2")
             if not self.categories_collapsed:
                 name_label.pack(side="left", padx=12)
@@ -5041,7 +6700,7 @@ class AudioLibraryApp:
         if widgets is None:
             return
         background = (
-            ACCENT
+            FAVORITES_SELECTED_BG
             if selected
             else (FAVORITES_BG if person_id == FAVORITES_PERSON_ID else CARD)
         )
@@ -5054,14 +6713,12 @@ class AudioLibraryApp:
         is_favorites = person_id == FAVORITES_PERSON_ID
         name_label.configure(
             fg=(
-                "#ffffff"
-                if selected
-                else FAVORITES_TEXT if is_favorites else TEXT
+                FAVORITES_TEXT if is_favorites else TEXT
             )
         )
         count_label.configure(
             fg=(
-                "#ffffff"
+                ACCENT
                 if selected
                 else FAVORITES_MUTED if is_favorites else MUTED
             )
@@ -5074,12 +6731,14 @@ class AudioLibraryApp:
         if not is_favorites and person is None:
             person_id = FAVORITES_PERSON_ID
             is_favorites = True
+        if person_id not in self.workspace_open_tabs:
+            self.workspace_open_tabs.append(person_id)
         self.selected_person_id = person_id
         if not is_favorites:
             self.app_settings["last_person_id"] = person_id
             self._schedule_volume_save()
         self.person_title.configure(
-            text="★ Favorites" if is_favorites else (person.name if person else "Оберіть людину")
+            text="Favorites" if is_favorites else (person.name if person else "Оберіть людину")
         )
         normal_state = "disabled" if is_favorites else "normal"
         self.edit_person_button.configure(state=normal_state)
@@ -5092,6 +6751,7 @@ class AudioLibraryApp:
         else:
             self.refresh_people()
         self.refresh_tracks()
+        self._refresh_workspace_tabs()
 
     def add_person(self) -> None:
         name = self._ask_text("Нова людина", "Введіть ім'я:")
@@ -5547,8 +7207,8 @@ class AudioLibraryApp:
         notice._surface_image = render_rounded_surface(
             width,
             height,
-            fill="#450a0a" if error else "#422006",
-            outline="#dc2626" if error else "#b45309",
+            fill=ERROR_BG if error else WARNING_BG,
+            outline=ERROR_BORDER if error else CAUTION_BORDER,
             radius=11,
         )
         notice.create_image(0, 0, image=notice._surface_image, anchor="nw")
@@ -5556,7 +7216,7 @@ class AudioLibraryApp:
             width / 2,
             height / 2 - 2,
             text=tr(message),
-            fill="#fecaca" if error else "#fde68a",
+            fill=ERROR_TEXT if error else WARNING_TEXT,
             font=("Segoe UI Semibold", 10),
             anchor="center",
             width=width - 34,
@@ -5569,7 +7229,7 @@ class AudioLibraryApp:
         self._notice_hide_job = self.root.after(5200, self._hide_notice)
 
     def _show_hotkey_notice(self, value: str, parent: tk.Misc | None = None) -> None:
-        """Warn unobtrusively when a bare key is captured globally."""
+        """Warn unobtrusively when a bare key is observed globally."""
         try:
             parsed = parse_hotkey(value)
         except ValueError:
@@ -5580,7 +7240,8 @@ class AudioLibraryApp:
         self._show_notice(
             (
                 f"Клавіша {display_hotkey(value)} працює глобально й може "
-                "перехоплюватися під час введення тексту."
+                "запускати запис під час введення тексту, але саме натискання "
+                "залишається доступним грі або іншій програмі."
             ),
             parent,
         )
@@ -5600,6 +7261,7 @@ class AudioLibraryApp:
                 if track_id == STOP_HOTKEY_ACTION_ID:
                     self.stop_all_audio()
                 else:
+                    self._flash_remote_track(track_id)
                     self.play_track_in_microphone(track_id)
         except queue.Empty:
             pass
@@ -5614,7 +7276,7 @@ class AudioLibraryApp:
         if value:
             try:
                 parsed = parse_hotkey(value)
-                virtual_keys.append(parsed.virtual_key)
+                virtual_keys.extend(parsed.virtual_keys)
                 if parsed.modifiers & 0x0001:
                     virtual_keys.append(0x12)  # Alt
                 if parsed.modifiers & 0x0002:
@@ -5673,7 +7335,7 @@ class AudioLibraryApp:
             text=(
                 "Натисніть бажану комбінацію. Вона працюватиме глобально, "
                 "навіть коли AudioLib згорнута в трей. Можна призначити "
-                "як комбінацію, так і одну окрему клавішу."
+                "одну клавішу або послідовність, наприклад Alt + 1 + 0 + 2."
             ),
             bg=BG,
             fg=MUTED,
@@ -5697,7 +7359,7 @@ class AudioLibraryApp:
             content,
             textvariable=error_text,
             bg=BG,
-            fg="#fca5a5",
+            fg=ERROR_TEXT,
             font=("Segoe UI", 9),
             anchor="w",
         ).pack(fill="x", pady=(5, 0))
@@ -5712,7 +7374,9 @@ class AudioLibraryApp:
 
         completed = False
         pending_hotkey: str | None = None
-        pending_keycode: int | None = None
+        captured_key_names: list[str] = []
+        captured_modifiers = 0
+        capture_finalize_job: str | None = None
 
         def close_dialog() -> None:
             nonlocal completed
@@ -5769,21 +7433,50 @@ class AudioLibraryApp:
             self._reload_hotkeys_after_release(value, finish_registration)
 
         def capture_press(event: tk.Event) -> str:
-            nonlocal pending_hotkey, pending_keycode
+            nonlocal pending_hotkey, captured_modifiers
             if completed:
                 return "break"
             if event.keysym == "Escape":
                 close_dialog()
                 return "break"
-            if event.keysym == "BackSpace":
+            modifier_keysyms = {
+                "Control_L", "Control_R", "Alt_L", "Alt_R", "Shift_L", "Shift_R",
+                "Meta_L", "Meta_R", "Super_L", "Super_R",
+            }
+            if event.keysym in modifier_keysyms:
+                return "break"
+            modifiers_down = any(
+                ctypes.windll.user32.GetAsyncKeyState(key) & 0x8000
+                for key in (0x10, 0x11, 0x12, 0x5B, 0x5C)
+            )
+            if event.keysym == "BackSpace" and not modifiers_down:
                 save_hotkey(None)
                 return "break"
             try:
-                value = hotkey_from_tk_event(
-                    event.keysym,
-                    int(event.state),
-                    int(event.keycode),
+                pressed = parse_hotkey(
+                    hotkey_from_tk_event(
+                        event.keysym,
+                        int(event.state),
+                        int(event.keycode),
+                    )
                 )
+                key_name = pressed.key_names[0]
+                if key_name not in captured_key_names:
+                    captured_key_names.append(key_name)
+                captured_modifiers |= pressed.modifiers
+                modifier_names = [
+                    name
+                    for name, flag in (
+                        ("Ctrl", 0x0002),
+                        ("Alt", 0x0001),
+                        ("Shift", 0x0004),
+                        ("Win", 0x0008),
+                    )
+                    if captured_modifiers & flag
+                ]
+                value = parse_hotkey(
+                    "+".join((*modifier_names, *captured_key_names))
+                ).canonical
             except ValueError as error:
                 error_text.set(str(error))
                 return "break"
@@ -5793,24 +7486,50 @@ class AudioLibraryApp:
             captured_text.set(display_hotkey(value))
             error_text.set("")
             pending_hotkey = value
-            pending_keycode = int(event.keycode)
             return "break"
 
         def capture_release(event: tk.Event) -> str:
-            nonlocal pending_hotkey, pending_keycode
+            nonlocal pending_hotkey, capture_finalize_job
+            del event
             if completed or pending_hotkey is None:
                 return "break"
-            if int(event.keycode) != pending_keycode:
-                return "break"
-            value = pending_hotkey
-            pending_hotkey = None
-            pending_keycode = None
 
-            def finish_capture() -> None:
-                if not completed:
-                    save_hotkey(value)
+            if capture_finalize_job is not None:
+                try:
+                    dialog.after_cancel(capture_finalize_job)
+                except tk.TclError:
+                    pass
 
-            dialog.after(30, finish_capture)
+            def finish_when_released() -> None:
+                nonlocal pending_hotkey, capture_finalize_job
+                capture_finalize_job = None
+                if completed or pending_hotkey is None:
+                    return
+                try:
+                    parsed = parse_hotkey(pending_hotkey)
+                except ValueError as error:
+                    error_text.set(str(error))
+                    return
+                keys = list(parsed.virtual_keys)
+                if parsed.modifiers & 0x0001:
+                    keys.append(0x12)
+                if parsed.modifiers & 0x0002:
+                    keys.append(0x11)
+                if parsed.modifiers & 0x0004:
+                    keys.append(0x10)
+                if parsed.modifiers & 0x0008:
+                    keys.extend((0x5B, 0x5C))
+                if any(
+                    ctypes.windll.user32.GetAsyncKeyState(key) & 0x8000
+                    for key in keys
+                ):
+                    capture_finalize_job = dialog.after(40, finish_when_released)
+                    return
+                value = pending_hotkey
+                pending_hotkey = None
+                save_hotkey(value)
+
+            capture_finalize_job = dialog.after(80, finish_when_released)
             return "break"
 
         dialog._audiolib_close_callback = close_dialog
@@ -5858,7 +7577,7 @@ class AudioLibraryApp:
             text=(
                 "Натисніть нову комбінацію. Вона зупинятиме звук у динаміках "
                 "і віртуальному мікрофоні, навіть коли AudioLib згорнута в трей. "
-                "Також можна призначити одну окрему клавішу."
+                "Доступні окремі клавіші та послідовності на кшталт Alt + 1 + 0 + 2."
             ),
             bg=BG,
             fg=MUTED,
@@ -5881,14 +7600,16 @@ class AudioLibraryApp:
             content,
             textvariable=error_text,
             bg=BG,
-            fg="#fca5a5",
+            fg=ERROR_TEXT,
             font=("Segoe UI", 9),
             anchor="w",
         ).pack(fill="x", pady=(5, 0))
 
         completed = False
         pending_hotkey: str | None = None
-        pending_keycode: int | None = None
+        captured_key_names: list[str] = []
+        captured_modifiers = 0
+        capture_finalize_job: str | None = None
 
         def close_dialog() -> None:
             nonlocal completed
@@ -5906,18 +7627,42 @@ class AudioLibraryApp:
             )
 
         def capture_press(event: tk.Event) -> str:
-            nonlocal completed, pending_hotkey, pending_keycode
+            nonlocal completed, pending_hotkey, captured_modifiers
             if completed:
                 return "break"
             if event.keysym == "Escape":
                 close_dialog()
                 return "break"
+            if event.keysym in {
+                "Control_L", "Control_R", "Alt_L", "Alt_R", "Shift_L", "Shift_R",
+                "Meta_L", "Meta_R", "Super_L", "Super_R",
+            }:
+                return "break"
             try:
-                value = hotkey_from_tk_event(
-                    event.keysym,
-                    int(event.state),
-                    int(event.keycode),
+                pressed = parse_hotkey(
+                    hotkey_from_tk_event(
+                        event.keysym,
+                        int(event.state),
+                        int(event.keycode),
+                    )
                 )
+                key_name = pressed.key_names[0]
+                if key_name not in captured_key_names:
+                    captured_key_names.append(key_name)
+                captured_modifiers |= pressed.modifiers
+                modifier_names = [
+                    name
+                    for name, flag in (
+                        ("Ctrl", 0x0002),
+                        ("Alt", 0x0001),
+                        ("Shift", 0x0004),
+                        ("Win", 0x0008),
+                    )
+                    if captured_modifiers & flag
+                ]
+                value = parse_hotkey(
+                    "+".join((*modifier_names, *captured_key_names))
+                ).canonical
             except ValueError as error:
                 error_text.set(str(error))
                 return "break"
@@ -5931,23 +7676,48 @@ class AudioLibraryApp:
             captured_text.set(display_hotkey(value))
             error_text.set("")
             pending_hotkey = value
-            pending_keycode = int(event.keycode)
             return "break"
 
         def capture_release(event: tk.Event) -> str:
-            nonlocal completed, pending_hotkey, pending_keycode
+            nonlocal completed, pending_hotkey, capture_finalize_job
+            del event
             if completed or pending_hotkey is None:
                 return "break"
-            if int(event.keycode) != pending_keycode:
-                return "break"
-            value = pending_hotkey
-            pending_hotkey = None
-            pending_keycode = None
 
-            def finish_capture() -> None:
-                nonlocal completed
-                if completed:
+            if capture_finalize_job is not None:
+                try:
+                    dialog.after_cancel(capture_finalize_job)
+                except tk.TclError:
+                    pass
+
+            def finish_when_released() -> None:
+                nonlocal completed, pending_hotkey, capture_finalize_job
+                capture_finalize_job = None
+                if completed or pending_hotkey is None:
                     return
+                try:
+                    parsed = parse_hotkey(pending_hotkey)
+                except ValueError as error:
+                    error_text.set(str(error))
+                    return
+                keys = list(parsed.virtual_keys)
+                if parsed.modifiers & 0x0001:
+                    keys.append(0x12)
+                if parsed.modifiers & 0x0002:
+                    keys.append(0x11)
+                if parsed.modifiers & 0x0004:
+                    keys.append(0x10)
+                if parsed.modifiers & 0x0008:
+                    keys.extend((0x5B, 0x5C))
+                if any(
+                    ctypes.windll.user32.GetAsyncKeyState(key) & 0x8000
+                    for key in keys
+                ):
+                    capture_finalize_job = dialog.after(40, finish_when_released)
+                    return
+
+                value = pending_hotkey
+                pending_hotkey = None
                 self.app_settings["stop_hotkey"] = value
                 self._save_volume_setting()
                 completed = True
@@ -5982,7 +7752,7 @@ class AudioLibraryApp:
 
                 self._reload_hotkeys_after_release(value, finish_registration)
 
-            dialog.after(30, finish_capture)
+            capture_finalize_job = dialog.after(80, finish_when_released)
             return "break"
 
         dialog._audiolib_close_callback = close_dialog
@@ -6589,13 +8359,14 @@ class AudioLibraryApp:
         window = tk.Toplevel(self.root)
         self.settings_window = window
         window.title(tr("Налаштування"))
-        window_width = 620
-        window_height = 650
+        window_width = 900
+        window_height = 680
         self.root.update_idletasks()
         window_x = self.root.winfo_x() + max(0, (self.root.winfo_width() - window_width) // 2)
         window_y = self.root.winfo_y() + max(0, (self.root.winfo_height() - window_height) // 2)
         window.geometry(f"{window_width}x{window_height}+{window_x}+{window_y}")
-        window.resizable(False, False)
+        window.minsize(820, 620)
+        window.resizable(True, True)
         window.configure(bg=BG)
         window.transient(self.root)
         self._build_secondary_title_bar(window, "Налаштування")
@@ -6618,59 +8389,134 @@ class AudioLibraryApp:
 
         shell = tk.Frame(window, bg=BG)
         shell.pack(fill="both", expand=True)
-        settings_canvas = tk.Canvas(
-            shell, bg=BG, highlightthickness=0, bd=0
-        )
-        settings_scrollbar = ttk.Scrollbar(
-            shell,
-            orient="vertical",
-            command=settings_canvas.yview,
-            style="AudioLib.Vertical.TScrollbar",
-        )
-        content = tk.Frame(settings_canvas, bg=BG)
-        content_window = settings_canvas.create_window(
-            (0, 0), window=content, anchor="nw"
-        )
-        settings_canvas.configure(yscrollcommand=settings_scrollbar.set)
-        settings_scrollbar.pack(side="right", fill="y", pady=8)
-        settings_canvas.pack(side="left", fill="both", expand=True)
-        content.bind(
-            "<Configure>",
-            lambda _event: settings_canvas.configure(
-                scrollregion=settings_canvas.bbox("all")
-            ),
-        )
-        settings_canvas.bind(
-            "<Configure>",
-            lambda event: settings_canvas.itemconfigure(
-                content_window, width=event.width
-            ),
-        )
-        window.bind(
-            "<MouseWheel>",
-            lambda event: settings_canvas.yview_scroll(
-                -1 if event.delta > 0 else 1, "units"
-            ),
-        )
+
+        sidebar_bg = PANEL
+        active_bg = SECONDARY
+        navigation = tk.Frame(shell, bg=sidebar_bg, width=220)
+        navigation.pack(side="left", fill="y")
+        navigation.pack_propagate(False)
+        tk.Frame(shell, bg=BORDER, width=1).pack(side="left", fill="y")
+        page_host = tk.Frame(shell, bg=BG)
+        page_host.pack(side="left", fill="both", expand=True)
+
+        LocalizedLabel(
+            navigation,
+            text="Налаштування",
+            bg=sidebar_bg,
+            fg=TEXT,
+            anchor="w",
+            font=("Segoe UI Semibold", 16),
+        ).pack(fill="x", padx=20, pady=(24, 4))
+        LocalizedLabel(
+            navigation,
+            text="AudioLib",
+            bg=sidebar_bg,
+            fg=MUTED,
+            anchor="w",
+            font=("Segoe UI", 9),
+        ).pack(fill="x", padx=20, pady=(0, 20))
+
+        pages: dict[str, tuple[tk.Frame, tk.Canvas, tk.Frame]] = {}
+        nav_buttons: dict[str, tk.Button] = {}
+        active_page_key = ""
+        content = tk.Frame(page_host, bg=BG)
+        page_descriptions = {
+            "Загальні": "Запуск, поведінка вікна та мова",
+            "Відтворення": "Виведення звуку, гучність і гарячі клавіші",
+            "Віртуальний мікрофон": "Маршрутизація, затримка та драйвер VB-CABLE",
+            "Вигляд": "Тема, акцент і щільність бібліотеки",
+            "Бібліотека": "Резервні копії аудіо та налаштувань",
+            "Оновлення": "Версія програми та перевірка оновлень",
+        }
+        page_titles = {
+            "Відтворення": "Звук",
+            "Вигляд": "Інтерфейс",
+        }
+
+        def paint_navigation_button(page_key: str, *, hovered: bool = False) -> None:
+            button = nav_buttons.get(page_key)
+            if button is None:
+                return
+            active = page_key == active_page_key
+            background = active_bg if active else HOVER if hovered else sidebar_bg
+            button.configure(
+                bg=background,
+                fg=TEXT if active or hovered else MUTED,
+                activebackground=HOVER,
+                activeforeground=TEXT,
+                font=("Segoe UI Semibold" if active else "Segoe UI", 10),
+            )
+
+        def activate_page(key: str) -> None:
+            nonlocal active_page_key
+            if key not in pages:
+                return
+            active_page_key = key
+            for page_key, (page, _canvas, _inner) in pages.items():
+                if page_key == key:
+                    page.pack(fill="both", expand=True)
+                else:
+                    page.pack_forget()
+            for page_key in nav_buttons:
+                paint_navigation_button(page_key)
 
         def add_section_heading(text: str, top_padding: int = 18) -> None:
-            section_header = tk.Frame(content, bg=BG)
-            section_header.pack(
-                fill="x", padx=22, pady=(top_padding, 8)
+            del top_padding
+            nonlocal content
+            page = tk.Frame(page_host, bg=BG)
+            canvas = tk.Canvas(page, bg=BG, highlightthickness=0, bd=0)
+            scrollbar = ttk.Scrollbar(
+                page,
+                orient="vertical",
+                command=canvas.yview,
+                style="AudioLib.Vertical.TScrollbar",
             )
-            tk.Frame(section_header, bg=BORDER, height=1).pack(
-                side="left", fill="x", expand=True, padx=(0, 10)
+            content = tk.Frame(canvas, bg=BG)
+            content_window = canvas.create_window((0, 0), window=content, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            scrollbar.pack(side="right", fill="y", pady=8)
+            canvas.pack(side="left", fill="both", expand=True)
+            content.bind(
+                "<Configure>",
+                lambda _event, target=canvas: target.configure(
+                    scrollregion=target.bbox("all")
+                ),
             )
+            canvas.bind(
+                "<Configure>",
+                lambda event, target=canvas, item=content_window: target.itemconfigure(
+                    item, width=event.width
+                ),
+            )
+            pages[text] = (page, canvas, content)
+
+            page_header = tk.Frame(content, bg=BG)
+            page_header.pack(fill="x", padx=24, pady=(24, 20))
             LocalizedLabel(
-                section_header,
-                text=text,
+                page_header,
+                text=page_titles.get(text, text),
+                bg=BG,
+                fg=TEXT,
+                anchor="w",
+                font=("Segoe UI Semibold", 20),
+            ).pack(fill="x")
+            LocalizedLabel(
+                page_header,
+                text=page_descriptions.get(text, ""),
                 bg=BG,
                 fg=MUTED,
-                font=("Segoe UI Semibold", 10),
-            ).pack(side="left")
-            tk.Frame(section_header, bg=BORDER, height=1).pack(
-                side="left", fill="x", expand=True, padx=(10, 0)
-            )
+                anchor="w",
+                font=("Segoe UI", 10),
+            ).pack(fill="x", pady=(4, 0))
+
+        def scroll_active_page(event: tk.Event) -> str:
+            if active_page_key in pages:
+                pages[active_page_key][1].yview_scroll(
+                    -1 if event.delta > 0 else 1, "units"
+                )
+            return "break"
+
+        window.bind("<MouseWheel>", scroll_active_page)
 
         autostart_value = tk.BooleanVar(
             value=bool(self.app_settings["autostart_enabled"])
@@ -6712,6 +8558,9 @@ class AudioLibraryApp:
         density_value = tk.StringVar()
         library_view_value = tk.StringVar()
         theme_value = tk.StringVar()
+        show_workspace_tabs_value = tk.BooleanVar(
+            value=bool(self.app_settings.get("show_workspace_tabs", False))
+        )
         check_updates_value = tk.BooleanVar(
             value=bool(self.app_settings["check_updates_on_startup"])
         )
@@ -6780,7 +8629,7 @@ class AudioLibraryApp:
 
         add_section_heading("Загальні")
         general_panel = tk.Frame(content, bg=PANEL, padx=14, pady=8)
-        general_panel.pack(fill="x", padx=22)
+        general_panel.pack(fill="x", padx=24)
         switch_row(
             general_panel,
             "Запускати AudioLib разом із Windows",
@@ -6957,7 +8806,7 @@ class AudioLibraryApp:
 
         add_section_heading("Відтворення")
         playback_panel = tk.Frame(content, bg=PANEL, padx=14, pady=10)
-        playback_panel.pack(fill="x", padx=22)
+        playback_panel.pack(fill="x", padx=24)
 
         output_row = tk.Frame(playback_panel, bg=PANEL)
         output_row.pack(fill="x", pady=(0, 9))
@@ -7091,7 +8940,7 @@ class AudioLibraryApp:
         add_section_heading("Віртуальний мікрофон")
 
         header = tk.Frame(content, bg=BG)
-        header.pack(fill="x", padx=22, pady=(0, 4))
+        header.pack(fill="x", padx=24, pady=(0, 4))
         LocalizedLabel(
             header, text="VB-CABLE", bg=BG, fg=TEXT,
             font=("Segoe UI Semibold", 20),
@@ -7111,17 +8960,17 @@ class AudioLibraryApp:
             ),
             bg=BG, fg=MUTED, justify="left", wraplength=570,
             font=("Segoe UI", 10),
-        ).pack(anchor="w", padx=22, pady=(0, 12))
+        ).pack(anchor="w", padx=24, pady=(0, 12))
         status_label = LocalizedLabel(
             content, textvariable=status, bg=PANEL, fg=TEXT, anchor="w",
             padx=12, pady=10, font=("Segoe UI Semibold", 10),
         )
-        status_label.pack(fill="x", padx=22, pady=6)
+        status_label.pack(fill="x", padx=24, pady=6)
 
         microphone_choices: list[CaptureEndpoint] = []
         microphone_value = tk.StringVar()
         microphone_row = tk.Frame(content, bg=BG)
-        microphone_row.pack(fill="x", padx=22, pady=(2, 6))
+        microphone_row.pack(fill="x", padx=24, pady=(2, 6))
         LocalizedLabel(
             microphone_row,
             text="Фізичний мікрофон:",
@@ -7176,7 +9025,7 @@ class AudioLibraryApp:
         microphone_box.pack(side="left", fill="x", expand=True)
 
         latency_row = tk.Frame(content, bg=BG)
-        latency_row.pack(fill="x", padx=22, pady=(4, 6))
+        latency_row.pack(fill="x", padx=24, pady=(4, 6))
         LocalizedLabel(
             latency_row,
             text="Затримка / стабільність:",
@@ -7222,7 +9071,7 @@ class AudioLibraryApp:
         latency_box.pack(side="left", fill="x", expand=True)
 
         kernel_streaming_panel = tk.Frame(content, bg=PANEL, padx=14, pady=5)
-        kernel_streaming_panel.pack(fill="x", padx=22, pady=(5, 2))
+        kernel_streaming_panel.pack(fill="x", padx=24, pady=(5, 2))
 
         def apply_kernel_streaming() -> None:
             enabled = kernel_streaming_value.get()
@@ -7263,12 +9112,12 @@ class AudioLibraryApp:
             ),
             bg=WARNING_BG, fg=WARNING_TEXT, justify="left", wraplength=548,
             padx=11, pady=9, font=("Segoe UI Semibold", 9),
-        ).pack(fill="x", padx=22, pady=(6, 4))
+        ).pack(fill="x", padx=24, pady=(6, 4))
 
         def refresh_status() -> None:
             installed, text = self.virtual_microphone.device_status()
             status.set(("✓ " if installed else "• ") + text)
-            status_label.configure(fg="#34d399" if installed else "#fbbf24")
+            status_label.configure(fg=SUCCESS_TEXT if installed else CAUTION_TEXT)
             load_microphones()
 
         def prepare_and_launch(removing: bool) -> None:
@@ -7304,11 +9153,11 @@ class AudioLibraryApp:
                 refresh_status()
 
         buttons = tk.Frame(content, bg=BG)
-        buttons.pack(fill="x", padx=22, pady=10)
+        buttons.pack(fill="x", padx=24, pady=12)
         for column in range(3):
             buttons.columnconfigure(column, weight=1, uniform="virtual-mic-actions")
         self._button(
-            buttons, "Встановити", lambda: prepare_and_launch(False), "#0f766e"
+            buttons, "Встановити", lambda: prepare_and_launch(False), ACCENT
         ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
         self._button(
             buttons, "Видалити / відкотити", lambda: prepare_and_launch(True), DANGER
@@ -7323,11 +9172,11 @@ class AudioLibraryApp:
                 "AudioLib змішуватиме звук з вашим фізичним мікрофоном."
             ),
             bg=BG, fg=MUTED, justify="left", wraplength=570, font=("Segoe UI", 9),
-        ).pack(anchor="w", padx=22)
+        ).pack(anchor="w", padx=24)
 
         add_section_heading("Бібліотека")
         library_panel = tk.Frame(content, bg=PANEL, padx=14, pady=12)
-        library_panel.pack(fill="x", padx=22)
+        library_panel.pack(fill="x", padx=24)
         LocalizedLabel(
             library_panel,
             text="Резервна копія містить базу, аудіозаписи, зображення та налаштування.",
@@ -7636,7 +9485,7 @@ class AudioLibraryApp:
             self.root.after(25, poll_import_result)
 
         backup_button = self._button(
-            library_actions, "Створити копію", make_library_backup, "#0f766e"
+            library_actions, "Створити копію", make_library_backup, ACCENT
         )
         backup_button.grid(row=0, column=0, sticky="ew", padx=(0, 4))
         import_button = self._button(
@@ -7646,7 +9495,7 @@ class AudioLibraryApp:
 
         add_section_heading("Вигляд")
         appearance_panel = tk.Frame(content, bg=PANEL, padx=14, pady=12)
-        appearance_panel.pack(fill="x", padx=22)
+        appearance_panel.pack(fill="x", padx=24)
         for column in range(3):
             appearance_panel.columnconfigure(column, weight=1, uniform="appearance")
 
@@ -7686,10 +9535,30 @@ class AudioLibraryApp:
             return dropdown
 
         def apply_accent() -> None:
-            save_setting("accent_color", accent_value.get())
+            selected_accent = accent_value.get()
+            previous_accent = str(self.app_settings.get("accent_color", "Янтарний"))
+            if selected_accent == "Власний":
+                _rgb, selected_color = colorchooser.askcolor(
+                    color=_valid_hex_color(
+                        self.app_settings.get("custom_accent_color", "#a34f0d")
+                    ),
+                    title=tr("Власний колір акценту"),
+                    parent=window,
+                )
+                if not selected_color:
+                    accent_value.set(previous_accent)
+                    return
+                self.app_settings["custom_accent_color"] = _valid_hex_color(
+                    selected_color
+                )
+            save_setting("accent_color", selected_accent)
             self._apply_saved_accent()
             style = ttk.Style(self.root)
-            style.map("Treeview", background=[("selected", ACCENT)])
+            style.map(
+                "Treeview",
+                background=[("selected", ACCENT)],
+                foreground=[("selected", _contrast_text_color(ACCENT))],
+            )
             style.configure(
                 "Settings.Horizontal.TProgressbar",
                 background=ACCENT,
@@ -7808,7 +9677,14 @@ class AudioLibraryApp:
                 )
             )
 
-        appearance_choice(0, 0, "Колір акценту", accent_value, list(ACCENT_PRESETS), apply_accent)
+        appearance_choice(
+            0,
+            0,
+            "Колір акценту",
+            accent_value,
+            [*ACCENT_PRESETS, "Власний"],
+            apply_accent,
+        )
         appearance_choice(0, 1, "Розмір зображень", photo_size_value, list(photo_labels), apply_photo_size)
         appearance_choice(0, 2, "Щільність списків", density_value, list(density_labels), apply_density)
         appearance_choice(1, 0, "Відображення бібліотеки", library_view_value, list(view_labels), apply_library_view)
@@ -7833,9 +9709,24 @@ class AudioLibraryApp:
         theme_restart_button.pack(fill="x")
         theme_restart_button.configure(state="disabled")
 
+        tabs_visibility_panel = tk.Frame(content, bg=PANEL, padx=14, pady=8)
+        tabs_visibility_panel.pack(fill="x", padx=24, pady=(12, 0))
+
+        def apply_workspace_tabs_visibility() -> None:
+            save_setting("show_workspace_tabs", show_workspace_tabs_value.get())
+            self._refresh_workspace_tabs()
+
+        switch_row(
+            tabs_visibility_panel,
+            "Показувати вкладки категорій",
+            "Відображає відкриті категорії над бібліотекою.",
+            show_workspace_tabs_value,
+            apply_workspace_tabs_visibility,
+        )
+
         add_section_heading("Оновлення")
         update_panel = tk.Frame(content, bg=PANEL, padx=14, pady=10)
-        update_panel.pack(fill="x", padx=22)
+        update_panel.pack(fill="x", padx=24)
         switch_row(
             update_panel,
             "Перевіряти оновлення під час запуску",
@@ -7923,23 +9814,18 @@ class AudioLibraryApp:
         refresh_update_controls()
 
         about_header = tk.Frame(content, bg=BG)
-        about_header.pack(fill="x", padx=22, pady=(18, 8))
-        tk.Frame(about_header, bg=BORDER, height=1).pack(
-            side="left", fill="x", expand=True, padx=(0, 10)
-        )
+        about_header.pack(fill="x", padx=24, pady=(24, 8))
         LocalizedLabel(
             about_header,
             text="Про програму",
             bg=BG,
-            fg=MUTED,
-            font=("Segoe UI Semibold", 10),
-        ).pack(side="left")
-        tk.Frame(about_header, bg=BORDER, height=1).pack(
-            side="left", fill="x", expand=True, padx=(10, 0)
-        )
+            fg=TEXT,
+            anchor="w",
+            font=("Segoe UI Semibold", 11),
+        ).pack(fill="x")
 
         about_panel = tk.Frame(content, bg=PANEL, padx=14, pady=10)
-        about_panel.pack(fill="x", padx=22, pady=(0, 22))
+        about_panel.pack(fill="x", padx=24, pady=(0, 24))
         about_panel.columnconfigure(1, weight=1)
         about_rows = (
             ("Назва", "AudioLib"),
@@ -7964,6 +9850,57 @@ class AudioLibraryApp:
                 anchor="w",
                 font=("Segoe UI Semibold", 10),
             ).grid(row=row, column=1, sticky="w", pady=2)
+        navigation_items = (
+            ("Загальні", "Загальні"),
+            ("Відтворення", "Звук"),
+            ("Віртуальний мікрофон", "Віртуальний мікрофон"),
+            ("Вигляд", "Інтерфейс"),
+            ("Бібліотека", "Бібліотека"),
+            ("Оновлення", "Оновлення"),
+        )
+        for page_key, label in navigation_items:
+            button = tk.Button(
+                navigation,
+                text=tr(label),
+                command=lambda key=page_key: activate_page(key),
+                bg=sidebar_bg,
+                fg=MUTED,
+                activebackground=BORDER,
+                activeforeground=TEXT,
+                relief="flat",
+                bd=0,
+                highlightthickness=0,
+                anchor="w",
+                padx=12,
+                pady=8,
+                cursor="hand2",
+                font=("Segoe UI", 10),
+            )
+            button.pack(fill="x", padx=12, pady=2)
+            nav_buttons[page_key] = button
+            button.bind(
+                "<Enter>",
+                lambda _event, key=page_key: paint_navigation_button(
+                    key, hovered=True
+                ),
+            )
+            button.bind(
+                "<Leave>",
+                lambda _event, key=page_key: paint_navigation_button(key),
+            )
+
+        LocalizedLabel(
+            navigation,
+            text="Зміни зберігаються автоматично",
+            bg=sidebar_bg,
+            fg=MUTED,
+            anchor="w",
+            justify="left",
+            wraplength=176,
+            font=("Segoe UI", 8),
+        ).pack(side="bottom", fill="x", padx=20, pady=20)
+
+        activate_page("Загальні")
         refresh_status()
         window.update_idletasks()
         window.deiconify()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import threading
+import time
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Callable, Mapping
@@ -11,11 +12,14 @@ MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
 MOD_SHIFT = 0x0004
 MOD_WIN = 0x0008
-MOD_NOREPEAT = 0x4000
-WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012
 WM_RELOAD_HOTKEYS = 0x8001
 PM_NOREMOVE = 0x0000
+WH_KEYBOARD_LL = 13
+WM_KEYDOWN = 0x0100
+WM_KEYUP = 0x0101
+WM_SYSKEYDOWN = 0x0104
+WM_SYSKEYUP = 0x0105
 
 
 SPECIAL_KEYS = {
@@ -37,8 +41,14 @@ SPECIAL_KEYS = {
 @dataclass(frozen=True)
 class ParsedHotkey:
     modifiers: int
-    virtual_key: int
+    virtual_keys: tuple[int, ...]
+    key_names: tuple[str, ...]
     canonical: str
+
+    @property
+    def virtual_key(self) -> int:
+        """Compatibility alias for older callers expecting one main key."""
+        return self.virtual_keys[-1]
 
 
 @dataclass
@@ -60,6 +70,16 @@ class MSG(ctypes.Structure):
         ("lParam", wintypes.LPARAM),
         ("time", wintypes.DWORD),
         ("pt", POINT),
+    ]
+
+
+class KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("vkCode", wintypes.DWORD),
+        ("scanCode", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
     ]
 
 
@@ -121,9 +141,26 @@ def parse_hotkey(value: str) -> ParsedHotkey:
         if not modifiers & flag:
             modifiers |= flag
             modifier_names.append(name)
-    if len(key_parts) != 1:
-        raise ValueError("Комбінація має містити одну основну клавішу")
-    key_name, virtual_key = _canonical_key_name(key_parts[0])
+    expanded_key_parts: list[str] = []
+    for part in key_parts:
+        # Allow the compact notation requested by users: Alt+102 is stored as
+        # the ordered chord Alt+1+0+2.
+        if len(part) > 1 and part.isdigit():
+            expanded_key_parts.extend(part)
+        else:
+            expanded_key_parts.append(part)
+    if not expanded_key_parts:
+        raise ValueError("Комбінація має містити хоча б одну основну клавішу")
+    if len(expanded_key_parts) > 8:
+        raise ValueError("Комбінація може містити не більше восьми клавіш")
+    key_names: list[str] = []
+    virtual_keys: list[int] = []
+    for part in expanded_key_parts:
+        key_name, virtual_key = _canonical_key_name(part)
+        if virtual_key in virtual_keys:
+            raise ValueError("Одна клавіша не може повторюватися в комбінації")
+        key_names.append(key_name)
+        virtual_keys.append(virtual_key)
     ordered = [
         name
         for name, flag in (
@@ -134,7 +171,12 @@ def parse_hotkey(value: str) -> ParsedHotkey:
         )
         if modifiers & flag
     ]
-    return ParsedHotkey(modifiers, virtual_key, "+".join((*ordered, key_name)))
+    return ParsedHotkey(
+        modifiers,
+        tuple(virtual_keys),
+        tuple(key_names),
+        "+".join((*ordered, *key_names)),
+    )
 
 
 def hotkey_from_tk_event(
@@ -198,7 +240,14 @@ def display_hotkey(value: str | None) -> str:
 
 
 class GlobalHotkeyManager:
-    """Keeps one Windows message thread and updates its global hotkeys in place."""
+    """Observe global keys without consuming them from the active application."""
+
+    _MODIFIER_KEYS = {
+        0x10, 0xA0, 0xA1,  # Shift
+        0x11, 0xA2, 0xA3,  # Ctrl
+        0x12, 0xA4, 0xA5,  # Alt
+        0x5B, 0x5C,        # Win
+    }
 
     def __init__(self, callback: Callable[[int], None]) -> None:
         self._callback = callback
@@ -206,13 +255,28 @@ class GlobalHotkeyManager:
         self._thread_id: int | None = None
         self._lock = threading.Lock()
         self._ready = threading.Event()
+        self._hook_installed = False
         self._pending_request: ReloadRequest | None = None
+
+    @staticmethod
+    def _modifier_mask(pressed: set[int]) -> int:
+        modifiers = 0
+        if pressed.intersection({0x12, 0xA4, 0xA5}):
+            modifiers |= MOD_ALT
+        if pressed.intersection({0x11, 0xA2, 0xA3}):
+            modifiers |= MOD_CONTROL
+        if pressed.intersection({0x10, 0xA0, 0xA1}):
+            modifiers |= MOD_SHIFT
+        if pressed.intersection({0x5B, 0x5C}):
+            modifiers |= MOD_WIN
+        return modifiers
 
     def _ensure_thread(self) -> bool:
         with self._lock:
             thread = self._thread
             if thread is None or not thread.is_alive():
                 self._ready.clear()
+                self._hook_installed = False
                 thread = threading.Thread(
                     target=self._run,
                     daemon=True,
@@ -220,21 +284,33 @@ class GlobalHotkeyManager:
                 )
                 self._thread = thread
                 thread.start()
-        return self._ready.wait(0.5)
+        return self._ready.wait(0.8) and self._hook_installed
 
     def replace(
         self, bindings: Mapping[int, str], *, wait: bool = True
     ) -> dict[int, str]:
         parsed: dict[int, ParsedHotkey] = {}
         failures: dict[int, str] = {}
+        used: dict[str, int] = {}
         for track_id, value in bindings.items():
+            action_id = int(track_id)
             try:
-                parsed[int(track_id)] = parse_hotkey(value)
+                hotkey = parse_hotkey(value)
             except ValueError as error:
-                failures[int(track_id)] = str(error)
+                failures[action_id] = str(error)
+                continue
+            identity = hotkey.canonical.casefold()
+            if identity in used:
+                failures[action_id] = "Ця комбінація вже призначена іншій дії"
+                continue
+            used[identity] = action_id
+            parsed[action_id] = hotkey
         if not self._ensure_thread():
             failures.update(
-                {track_id: "Не вдалося запустити обробник гарячих клавіш" for track_id in parsed}
+                {
+                    action_id: "Не вдалося запустити пасивний обробник клавіш"
+                    for action_id in parsed
+                }
             )
             return failures
         request = ReloadRequest(parsed, {}, threading.Event())
@@ -245,14 +321,17 @@ class GlobalHotkeyManager:
             thread_id, WM_RELOAD_HOTKEYS, 0, 0
         ):
             failures.update(
-                {track_id: "Не вдалося оновити гарячі клавіші" for track_id in parsed}
+                {action_id: "Не вдалося оновити гарячі клавіші" for action_id in parsed}
             )
             return failures
         if not wait:
             return failures
-        if not request.done.wait(0.5):
+        if not request.done.wait(0.8):
             failures.update(
-                {track_id: "Windows не відповіла під час призначення клавіші" for track_id in parsed}
+                {
+                    action_id: "Windows не відповіла під час призначення клавіші"
+                    for action_id in parsed
+                }
             )
             return failures
         failures.update(request.failures)
@@ -263,48 +342,113 @@ class GlobalHotkeyManager:
         kernel32 = ctypes.windll.kernel32
         thread_id = int(kernel32.GetCurrentThreadId())
         message = MSG()
+        bindings: dict[int, ParsedHotkey] = {}
+        pressed: set[int] = set()
+        sequence: list[int] = []
+        sequence_modifiers = 0
+        last_sequence_time = 0.0
+
+        hook_callback_type = ctypes.WINFUNCTYPE(
+            ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
+        )
+        user32.SetWindowsHookExW.argtypes = [
+            ctypes.c_int,
+            hook_callback_type,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+        ]
+        user32.CallNextHookEx.restype = ctypes.c_ssize_t
+        user32.CallNextHookEx.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            wintypes.WPARAM,
+            wintypes.LPARAM,
+        ]
+        user32.SetWindowsHookExW.restype = ctypes.c_void_p
+        user32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
+        kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+
+        def hook_callback(n_code: int, w_param: int, l_param: int) -> int:
+            nonlocal sequence_modifiers, last_sequence_time
+            if n_code >= 0:
+                event = int(w_param)
+                data = ctypes.cast(
+                    l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)
+                ).contents
+                virtual_key = int(data.vkCode)
+                if event in {WM_KEYDOWN, WM_SYSKEYDOWN}:
+                    repeated = virtual_key in pressed
+                    pressed.add(virtual_key)
+                    if not repeated and virtual_key not in self._MODIFIER_KEYS:
+                        now = time.monotonic()
+                        modifiers = self._modifier_mask(pressed)
+                        if (
+                            now - last_sequence_time > 1.5
+                            or modifiers != sequence_modifiers
+                        ):
+                            sequence.clear()
+                        sequence_modifiers = modifiers
+                        last_sequence_time = now
+                        sequence.append(virtual_key)
+                        del sequence[:-8]
+
+                        candidates = [
+                            (action_id, hotkey)
+                            for action_id, hotkey in bindings.items()
+                            if hotkey.modifiers == modifiers
+                            and len(sequence) >= len(hotkey.virtual_keys)
+                            and tuple(sequence[-len(hotkey.virtual_keys):])
+                            == hotkey.virtual_keys
+                        ]
+                        if candidates:
+                            action_id, _hotkey = max(
+                                candidates, key=lambda item: len(item[1].virtual_keys)
+                            )
+                            try:
+                                self._callback(action_id)
+                            except Exception:
+                                pass
+                            sequence.clear()
+                elif event in {WM_KEYUP, WM_SYSKEYUP}:
+                    pressed.discard(virtual_key)
+                    if virtual_key in self._MODIFIER_KEYS:
+                        sequence.clear()
+                        sequence_modifiers = self._modifier_mask(pressed)
+
+            # The hook is deliberately passive. Returning CallNextHookEx for
+            # every event guarantees that games and other applications keep
+            # receiving W, Space and all other bound keys normally.
+            return int(user32.CallNextHookEx(None, n_code, w_param, l_param))
+
+        hook_proc = hook_callback_type(hook_callback)
+        module = kernel32.GetModuleHandleW(None)
+        hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, hook_proc, module, 0)
         user32.PeekMessageW(ctypes.byref(message), None, 0, 0, PM_NOREMOVE)
         with self._lock:
             self._thread_id = thread_id
+            self._hook_installed = bool(hook)
         self._ready.set()
-        registered: dict[int, int] = {}
+        if not hook:
+            return
         try:
             while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
-                if message.message == WM_HOTKEY:
-                    track_id = registered.get(int(message.wParam))
-                    if track_id is not None:
-                        self._callback(track_id)
-                elif message.message == WM_RELOAD_HOTKEYS:
-                    with self._lock:
-                        request = self._pending_request
-                        self._pending_request = None
-                    if request is None:
-                        continue
-                    for hotkey_id in registered:
-                        user32.UnregisterHotKey(None, hotkey_id)
-                    registered.clear()
-                    for hotkey_id, (track_id, hotkey) in enumerate(
-                        request.bindings.items(), start=1
-                    ):
-                        ok = user32.RegisterHotKey(
-                            None,
-                            hotkey_id,
-                            hotkey.modifiers | MOD_NOREPEAT,
-                            hotkey.virtual_key,
-                        )
-                        if ok:
-                            registered[hotkey_id] = track_id
-                        else:
-                            request.failures[track_id] = (
-                                "Ця комбінація вже використовується Windows або іншою програмою"
-                            )
-                    request.done.set()
+                if message.message != WM_RELOAD_HOTKEYS:
+                    continue
+                with self._lock:
+                    request = self._pending_request
+                    self._pending_request = None
+                if request is None:
+                    continue
+                bindings = dict(request.bindings)
+                pressed.clear()
+                sequence.clear()
+                request.done.set()
         finally:
-            for hotkey_id in registered:
-                user32.UnregisterHotKey(None, hotkey_id)
+            user32.UnhookWindowsHookEx(hook)
             with self._lock:
                 if self._thread_id == thread_id:
                     self._thread_id = None
+                self._hook_installed = False
                 request = self._pending_request
                 self._pending_request = None
             if request is not None:
@@ -319,6 +463,6 @@ class GlobalHotkeyManager:
             return
         if thread_id is not None:
             ctypes.windll.user32.PostThreadMessageW(thread_id, WM_QUIT, 0, 0)
-        thread.join(timeout=0.5)
+        thread.join(timeout=0.8)
         self._ready.clear()
 

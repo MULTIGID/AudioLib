@@ -5,11 +5,12 @@ import sys
 from pathlib import Path
 
 
-BG = "#111827"
-PANEL = "#1f2937"
-TEXT = "#f8fafc"
-MUTED = "#9ca3af"
-ACCENT = "#8b5cf6"
+BG = "#141415"
+PANEL = "#232325"
+BORDER = "#343438"
+TEXT = "#ededed"
+MUTED = "#85858b"
+ACCENT = "#a34f0d"
 
 
 class StartupSplash:
@@ -25,8 +26,7 @@ class StartupSplash:
         self._closed = False
         self.window = tk.Toplevel(master) if master is not None else tk.Tk()
         self.window.overrideredirect(True)
-        self.window.configure(bg="#334155")
-        self.window.attributes("-topmost", True)
+        self.window.configure(bg=BORDER)
 
         width, height = 430, 250
         x = max(0, (self.window.winfo_screenwidth() - width) // 2)

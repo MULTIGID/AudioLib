@@ -210,7 +210,7 @@ def prepare_official_installer() -> Path:
     partial = archive.with_suffix(".download")
     request = urllib.request.Request(
         DRIVER_URL,
-        headers={"User-Agent": "AudioLib/2.8.6 (+https://vb-audio.com/Cable/index.htm)"},
+        headers={"User-Agent": "AudioLib/3.0.0 (+https://vb-audio.com/Cable/index.htm)"},
     )
     try:
         with urllib.request.urlopen(request, timeout=30) as response, partial.open("wb") as output:
@@ -289,6 +289,9 @@ class VirtualMicrophoneBridge:
         self.monitor_name = ""
         self.screen_capture_protected = False
         self.screen_capture_protection_error = ""
+        self._stream_started_at = 0.0
+        self._capture_last_callback = 0.0
+        self._cable_last_callback = 0.0
 
     @staticmethod
     def _is_cable(name: str) -> bool:
@@ -297,6 +300,28 @@ class VirtualMicrophoneBridge:
 
     def is_running(self) -> bool:
         return self._cable_device is not None
+
+    def health_status(
+        self,
+        *,
+        startup_grace: float = 4.0,
+        callback_timeout: float = 3.0,
+    ) -> tuple[bool, str]:
+        """Report callback liveness, independent of microphone amplitude."""
+        if self._cable_device is None:
+            return False, "Вихід VB-CABLE не запущено"
+        now = time.monotonic()
+        if now - self._stream_started_at <= startup_grace:
+            return True, "Запуск аудіопотоку"
+        if now - self._cable_last_callback > callback_timeout:
+            return False, "Перестали надходити блоки до VB-CABLE"
+        if (
+            self._mix_microphone
+            and self._capture_device is not None
+            and now - self._capture_last_callback > callback_timeout
+        ):
+            return False, "Перестали надходити блоки фізичного мікрофона"
+        return True, "Аудіопотік працює"
 
     def configure(
         self,
@@ -424,6 +449,9 @@ class VirtualMicrophoneBridge:
         # fixed at that rate avoids an extra device-to-device conversion.
         self.sample_rate = SAMPLE_RATE
         self.capture_channels = self._select_capture_channels(physical_mic)
+        self._stream_started_at = time.monotonic()
+        self._capture_last_callback = self._stream_started_at
+        self._cable_last_callback = self._stream_started_at
         try:
             # Capture and VB-CABLE are separate devices with independent audio
             # clocks.  A DuplexStream ties their callbacks together and some
@@ -502,6 +530,7 @@ class VirtualMicrophoneBridge:
     def _capture_microphone(self):
         captured = yield b""
         while True:
+            self._capture_last_callback = time.monotonic()
             microphone = array.array("h")
             microphone.frombytes(captured)
             with self._lock:
@@ -531,6 +560,7 @@ class VirtualMicrophoneBridge:
         target_frames = self.sample_rate * profile["target"] // 1000
         latency_ceiling = self.sample_rate * profile["maximum"] // 1000
         while True:
+            self._cable_last_callback = time.monotonic()
             output = array.array("h")
             with self._lock:
                 # Capture and playback devices have independent clocks.  Do not
@@ -695,6 +725,9 @@ class VirtualMicrophoneBridge:
         self._monitor_device = None
         self._monitor_generator = None
         self.screen_capture_protected = False
+        self._stream_started_at = 0.0
+        self._capture_last_callback = 0.0
+        self._cable_last_callback = 0.0
         with self._lock:
             self._microphone_buffer.clear()
             self._microphone_buffer_ready = False
@@ -960,6 +993,9 @@ def run_microphone_relay_worker(
         bridge.start(preferred_capture_name, preferred_capture_description)
         _write_relay_result(ready_path, {"ok": True})
         while not stop_path.exists():
+            healthy, reason = bridge.health_status()
+            if not healthy:
+                raise VirtualAudioError(reason)
             if parent_handle is not None and kernel32 is not None:
                 wait_result = kernel32.WaitForSingleObject(
                     parent_handle,
