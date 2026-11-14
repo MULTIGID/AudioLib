@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="252" height="44" viewBox="0 0 252 44" role="img" aria-label="Завантажити останню версію">
+  <rect x="1" y="1" width="250" height="42" rx="11" fill="#b45309" stroke="#f59e0b" stroke-width="2"/>
+  <path d="M24 11v14m-5-5 5 5 5-5M18 31h12" fill="none" stroke="#fff7ed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="142" y="27" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#fff7ed">ЗАВАНТАЖИТИ ОСТАННЮ ВЕРСІЮ</text>
+</svg>

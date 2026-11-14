@@ -1,18 +1,22 @@
 <div align="center">
-  <img src="assets/audiolib_icon.png" alt="AudioLib logo" width="132">
+  <img src="assets/audiolib_icon.png" alt="AudioLib logo" width="144">
 
   <h1>AudioLib</h1>
 
   <p><strong>A fast, local audio library and soundboard for Windows.</strong></p>
   <p>Organize recordings, launch them with global hotkeys, and optionally route audio through a virtual microphone.</p>
 
+  <p><img src="assets/readme_badges.svg" alt="Latest release · Windows 10/11 · Python 3.11+ · Local and private" width="690"></p>
+
   <p>
     <a href="README.md"><kbd>English</kbd></a>
     <a href="README.uk.md"><kbd>Українська</kbd></a>
   </p>
+
+  <a href="../../releases/latest"><img src="assets/readme_download_en.svg" alt="Download latest release" width="244"></a>
 </div>
 
----
+<img src="assets/readme_divider.svg" alt="" width="100%">
 
 Current version: **3.0.1**.
 
@@ -41,7 +45,7 @@ Do not run the application directly from inside the ZIP archive.
 - automatic recovery of Windows audio routing after an unexpected shutdown;
 - background update checks and secure in-app installation from GitHub Releases without replacing the local library.
 
-All images, recordings, database files, and settings are stored locally in the `data` directory and are never sent to the developer.
+> **Local by design.** All images, recordings, database files, and settings are stored locally in the `data` directory and are never sent to the developer.
 
 ## Running from source
 
