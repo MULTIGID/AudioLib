@@ -6,7 +6,7 @@
   <p><strong>Швидка локальна бібліотека аудіозаписів і саундборд для Windows.</strong></p>
   <p>Упорядковуйте записи, запускайте їх глобальними гарячими клавішами та за потреби виводьте звук у віртуальний мікрофон.</p>
 
-  <p><a href="#можливості"><img src="assets/readme_badges.svg" alt="Остання версія · Windows 10/11 · Python 3.11+ · Локально та приватно" width="690"></a></p>
+  <p><a href="#можливості"><img src="assets/readme_badges.svg" alt="Windows 10/11 · Python 3.11+ · Локально та приватно" width="546"></a></p>
 
   <p>
     <a href="README.md"><kbd>English</kbd></a>

@@ -6,7 +6,7 @@
   <p><strong>A fast, local audio library and soundboard for Windows.</strong></p>
   <p>Organize recordings, launch them with global hotkeys, and optionally route audio through a virtual microphone.</p>
 
-  <p><a href="#features"><img src="assets/readme_badges.svg" alt="Latest release · Windows 10/11 · Python 3.11+ · Local and private" width="690"></a></p>
+  <p><a href="#features"><img src="assets/readme_badges.svg" alt="Windows 10/11 · Python 3.11+ · Local and private" width="546"></a></p>
 
   <p>
     <a href="README.md"><kbd>English</kbd></a>
