@@ -1,9 +1,18 @@
-# AudioLib
+<div align="center">
+  <img src="assets/audiolib_icon.png" alt="Логотип AudioLib" width="132">
 
-<a href="README.md"><kbd>English</kbd></a>
-<a href="README.uk.md"><kbd>Українська</kbd></a>
+  <h1>AudioLib</h1>
 
-AudioLib — локальна Windows-бібліотека аудіозаписів із категоріями, гарячими клавішами, керуванням із системного трея та додатковим виведенням звуку у віртуальний мікрофон через VB-CABLE.
+  <p><strong>Швидка локальна бібліотека аудіозаписів і саундборд для Windows.</strong></p>
+  <p>Упорядковуйте записи, запускайте їх глобальними гарячими клавішами та за потреби виводьте звук у віртуальний мікрофон.</p>
+
+  <p>
+    <a href="README.md"><kbd>English</kbd></a>
+    <a href="README.uk.md"><kbd>Українська</kbd></a>
+  </p>
+</div>
+
+---
 
 Поточна версія: **3.0.0**.
 

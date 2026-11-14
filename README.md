@@ -1,9 +1,18 @@
-# AudioLib
+<div align="center">
+  <img src="assets/audiolib_icon.png" alt="AudioLib logo" width="132">
 
-<a href="README.md"><kbd>English</kbd></a>
-<a href="README.uk.md"><kbd>Українська</kbd></a>
+  <h1>AudioLib</h1>
 
-AudioLib is a local audio library for Windows with categories, global hotkeys, system-tray controls, and optional audio routing to a virtual microphone through VB-CABLE.
+  <p><strong>A fast, local audio library and soundboard for Windows.</strong></p>
+  <p>Organize recordings, launch them with global hotkeys, and optionally route audio through a virtual microphone.</p>
+
+  <p>
+    <a href="README.md"><kbd>English</kbd></a>
+    <a href="README.uk.md"><kbd>Українська</kbd></a>
+  </p>
+</div>
+
+---
 
 Current version: **3.0.0**.
 
