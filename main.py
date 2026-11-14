@@ -17,7 +17,7 @@ from audiolib.startup import (
 
 ERROR_ALREADY_EXISTS = 183
 WAIT_OBJECT_0 = 0
-INSTANCE_EVENT_NAME = "Local\\MULTIGID.AudioLib.3.0.0.ShowWindow"
+INSTANCE_EVENT_NAME = "Local\\MULTIGID.AudioLib.3.0.1.ShowWindow"
 
 
 def _application_root() -> Path:
@@ -66,9 +66,12 @@ def _startup_language(root_dir: Path) -> str:
         payload = json.loads(
             (root_dir / "data" / "app_settings.json").read_text(encoding="utf-8")
         )
-        return "en" if payload.get("language") == "en" else "uk"
+        # Keep an explicitly saved language, but default new installations and
+        # malformed settings to English so the first-run interface is usable
+        # for an international audience.
+        return "uk" if payload.get("language") == "uk" else "en"
     except (FileNotFoundError, OSError, ValueError, TypeError, AttributeError):
-        return "uk"
+        return "en"
 
 
 def _signal_update_start_ready() -> None:

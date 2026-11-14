@@ -2,12 +2,12 @@ from __future__ import annotations
 
 
 SUPPORTED_LANGUAGES = {"uk", "en"}
-_active_language = "uk"
+_active_language = "en"
 
 
 def set_language(language: str) -> None:
     global _active_language
-    _active_language = language if language in SUPPORTED_LANGUAGES else "uk"
+    _active_language = language if language in SUPPORTED_LANGUAGES else "en"
 
 
 def get_language() -> str:

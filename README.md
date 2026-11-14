@@ -14,7 +14,7 @@
 
 ---
 
-Current version: **3.0.0**.
+Current version: **3.0.1**.
 
 ## Ready-to-use Windows build
 

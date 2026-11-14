@@ -2842,6 +2842,13 @@ class AudioLibraryApp:
         self._configure_styles()
         report_startup(70, "Побудова інтерфейсу…", "Building interface…")
         self._build_ui()
+        # The saved compact-sidebar state affects both the card contents and
+        # the PanedWindow sash.  Card contents can be laid out immediately,
+        # but Tk ignores/clamps an early sash position until the main window
+        # has received its final size.  Apply it now and repeat the sash
+        # placement once the initial layout has settled.
+        self._apply_categories_panel_state()
+        self.root.after_idle(self._restore_categories_panel_sash)
         self._create_resize_grips()
         self.root.bind("<Map>", self._on_root_map, add="+")
         self.root.bind("<Configure>", self._schedule_window_geometry_save, add="+")
@@ -2894,7 +2901,7 @@ class AudioLibraryApp:
             "auto_virtual_microphone": False,
             "close_action": "tray",
             "startup_view": "favorites",
-            "language": "uk",
+            "language": "en",
             "stop_hotkey": DEFAULT_STOP_HOTKEY,
             "last_person_id": None,
             "output_device": "",
@@ -2954,7 +2961,7 @@ class AudioLibraryApp:
         if defaults["startup_view"] not in {"favorites", "last"}:
             defaults["startup_view"] = "favorites"
         if defaults["language"] not in {"uk", "en"}:
-            defaults["language"] = "uk"
+            defaults["language"] = "en"
         try:
             defaults["stop_hotkey"] = parse_hotkey(
                 str(defaults["stop_hotkey"])
@@ -6417,6 +6424,33 @@ class AudioLibraryApp:
             target_width = max(280, self._categories_expanded_width)
             self.body_paned.paneconfigure(self.categories_panel, minsize=280)
 
+        try:
+            self.body_paned.sash_place(0, target_width, 0)
+        except tk.TclError:
+            pass
+
+    def _restore_categories_panel_sash(self) -> None:
+        """Restore the saved sidebar width after Tk finishes initial layout."""
+        if not self.root.winfo_exists():
+            return
+        target_width = (
+            max(116, int(self.app_settings.get("photo_size", 92)) + 38)
+            if self.categories_collapsed
+            else max(280, self._categories_expanded_width)
+        )
+        try:
+            self.root.update_idletasks()
+            self.body_paned.sash_place(0, target_width, 0)
+        except tk.TclError:
+            return
+        # A restored window geometry can be finalized one message-loop turn
+        # later on Windows.  Reassert only the sash position, without
+        # rebuilding cards or causing visible layout churn.
+        self.root.after(120, lambda: self._place_categories_sash(target_width))
+
+    def _place_categories_sash(self, target_width: int) -> None:
+        if not self.root.winfo_exists():
+            return
         try:
             self.body_paned.sash_place(0, target_width, 0)
         except tk.TclError:
